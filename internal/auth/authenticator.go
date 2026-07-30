@@ -15,20 +15,7 @@ import (
 
 var ErrUnauthorized = errors.New("unauthorized")
 
-// UserSync upserts the local users projection for JWT principals.
-type UserSync interface {
-	UpsertFromAuth(ctx context.Context, in UserSyncInput) (userID string, err error)
-}
-
-type UserSyncInput struct {
-	Subject       string
-	Email         string
-	EmailVerified bool
-	DisplayName   string
-}
-
 type Authenticator struct {
-	users      UserSync
 	jwtEnabled bool
 	audience   string
 	issuer     string
@@ -36,8 +23,7 @@ type Authenticator struct {
 }
 
 type Options struct {
-	Users    UserSync // optional; when set, JWT auth upserts local users
-	Issuer   string   // OIDC issuer URL, e.g. http://localhost:8443/realms/kalke
+	Issuer   string // OIDC issuer URL, e.g. http://localhost:8443/realms/kalke
 	Audience string
 }
 
@@ -60,7 +46,6 @@ func NewAuthenticator(opts Options) (*Authenticator, error) {
 		return nil, fmt.Errorf("jwks: %w", err)
 	}
 	return &Authenticator{
-		users:      opts.Users,
 		jwtEnabled: true,
 		audience:   audience,
 		issuer:     issuer,
@@ -99,26 +84,21 @@ func discoverJWKS(issuer string) (jwksURL, discoveredIssuer string, err error) {
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (Principal, error) {
+	_ = ctx
 	token := strings.TrimSpace(bearerToken)
-	if token == "" {
+	if token == "" || !a.jwtEnabled {
 		return Principal{}, ErrUnauthorized
 	}
-	if !a.jwtEnabled {
-		return Principal{}, ErrUnauthorized
-	}
-	return a.authenticateJWT(ctx, token)
+	return a.authenticateJWT(token)
 }
 
 type oidcClaims struct {
-	Permissions   []string `json:"permissions"`
-	Scope         string   `json:"scope"`
-	Email         string   `json:"email"`
-	EmailVerified bool     `json:"email_verified"`
-	Name          string   `json:"name"`
+	Permissions []string `json:"permissions"`
+	Scope       string   `json:"scope"`
 	jwt.RegisteredClaims
 }
 
-func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (Principal, error) {
+func (a *Authenticator) authenticateJWT(tokenStr string) (Principal, error) {
 	claims := &oidcClaims{}
 	parsed, err := jwt.ParseWithClaims(tokenStr, claims, a.jwks.Keyfunc,
 		jwt.WithAudience(a.audience),
@@ -128,29 +108,15 @@ func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (P
 	if err != nil || !parsed.Valid {
 		return Principal{}, ErrUnauthorized
 	}
-	scopes := scopesFromClaims(claims.Permissions, claims.Scope)
 	sub := claims.Subject
 	if sub == "" {
 		return Principal{}, ErrUnauthorized
 	}
-	p := Principal{
+	return Principal{
 		Subject: sub,
 		Kind:    KindJWT,
-		Scopes:  scopes,
-	}
-	if a.users != nil {
-		userID, err := a.users.UpsertFromAuth(ctx, UserSyncInput{
-			Subject:       sub,
-			Email:         claims.Email,
-			EmailVerified: claims.EmailVerified,
-			DisplayName:   claims.Name,
-		})
-		if err != nil {
-			return Principal{}, ErrUnauthorized
-		}
-		p.UserID = userID
-	}
-	return p, nil
+		Scopes:  scopesFromClaims(claims.Permissions, claims.Scope),
+	}, nil
 }
 
 // scopesFromClaims prefers the permissions claim, then space-separated scope.

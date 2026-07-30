@@ -8,7 +8,8 @@ info:
 
     **AuthN:** `Authorization: Bearer` with an OIDC access token (RS256) from
     an external IdP (e.g. kalke-auth / Keycloak). Humans use password/PKCE;
-    machines use client_credentials. This API stores a local `users` projection.
+    machines use client_credentials. This API is a pure resource server: no
+    local `users` table — audit via JWT `sub` on extractions (`auth_subject`).
 
     **AuthZ scopes:** `extract:write`, `admin` (implies all).
     JWT tokens without IdP `permissions` receive default `extract:write`.
@@ -22,7 +23,6 @@ servers:
     description: Local / Compose
 tags:
   - name: health
-  - name: users
   - name: extract
 security:
   - bearerAuth: []
@@ -67,35 +67,6 @@ paths:
               examples:
                 not_ready:
                   value: { status: not_ready, db: false, redis: true }
-
-  /v1/me:
-    get:
-      tags: [users]
-      summary: Current user profile
-      description: |
-        Any authenticated OIDC principal with a linked `user_id`.
-        No scope required. Disabled users receive 401.
-      operationId: getMe
-      responses:
-        "200":
-          description: Active user profile
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MeResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "500":
-          description: Misconfiguration
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                users_not_configured:
-                  value: { error: users not configured }
-
-
 
   /v1/extract:
     post:
@@ -297,15 +268,8 @@ components:
         - unknown doc_type
         - could not process document
         - extraction provider unavailable
-        - users not configured
-        - could not list api keys
         - invalid json body
-        - cannot create admin keys
         - unknown scope
-        - could not create api key
-        - missing key id
-        - api key not found
-        - could not revoke api key
 
     HealthResponse:
       type: object
@@ -333,36 +297,6 @@ components:
         redis:
           type: boolean
 
-    MeResponse:
-      type: object
-      required: [id, auth_subject, email_verified, status, auth_kind, scopes]
-      additionalProperties: false
-      properties:
-        id:
-          type: string
-          format: uuid
-        auth_subject:
-          type: string
-          description: OIDC `sub` (human or service account)
-        email:
-          type: string
-        email_verified:
-          type: boolean
-        display_name:
-          type: string
-        status:
-          type: string
-          enum: [active, disabled]
-        auth_kind:
-          type: string
-          enum: [jwt]
-        scopes:
-          type: array
-          items:
-            $ref: "#/components/schemas/Scope"
-
-
-
     ExtractResponse:
       type: object
       required: [doc_type, data]
@@ -388,7 +322,7 @@ components:
   responses:
     Unauthorized:
       description: |
-        Missing/invalid Bearer token, inactive user, or failed identity sync.
+        Missing or invalid Bearer token.
         Typical `error` values: `missing or invalid authorization`, `unauthorized`.
       content:
         application/json:

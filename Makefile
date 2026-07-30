@@ -172,11 +172,6 @@ health: ## Curl /health
 ready: ## Curl /ready
 	@curl -sS "http://localhost:$(APP_PORT)/ready"; echo
 
-.PHONY: me
-me: ## GET /v1/me (TOKEN=jwt required)
-	@if [ -z "$(TOKEN)" ]; then echo "Usage: make me TOKEN=<jwt>"; exit 1; fi
-	@curl -sS "http://localhost:$(APP_PORT)/v1/me" -H "Authorization: Bearer $(TOKEN)"; echo
-
 .PHONY: extract
 extract: ## POST /v1/extract (TOKEN= FILE=path [DOC_TYPE=identity_document])
 	@if [ -z "$(TOKEN)" ] || [ -z "$(FILE)" ]; then \
@@ -219,16 +214,20 @@ auth-m2m-token: ## Print M2M access_token from kalke-auth (client_credentials)
 	@$(MAKE) -C "$(KALKE_AUTH_DIR)" -s m2m-token
 
 .PHONY: smoke-oidc
-smoke-oidc: ## Human JWT smoke: password token → GET /v1/me
+smoke-oidc: ## Human JWT smoke: password token → POST /v1/extract without file (expect 400)
 	@token=$$($(MAKE) -C "$(KALKE_AUTH_DIR)" -s token); \
-	curl -sS -w "\nHTTP %{http_code}\n" "http://localhost:$(APP_PORT)/v1/me" \
-		-H "Authorization: Bearer $$token"
+	curl -sS -o /dev/null -w "HTTP %{http_code}\n" -X POST \
+		"http://localhost:$(APP_PORT)/v1/extract?doc_type=identity_document" \
+		-H "Authorization: Bearer $$token"; \
+	echo "(400 = JWT + scope OK; missing file)"
 
 .PHONY: smoke-m2m
-smoke-m2m: ## M2M JWT smoke: client_credentials → GET /v1/me
+smoke-m2m: ## M2M JWT smoke: client_credentials → POST /v1/extract without file (expect 400)
 	@token=$$($(MAKE) -C "$(KALKE_AUTH_DIR)" -s m2m-token); \
-	curl -sS -w "\nHTTP %{http_code}\n" "http://localhost:$(APP_PORT)/v1/me" \
-		-H "Authorization: Bearer $$token"
+	curl -sS -o /dev/null -w "HTTP %{http_code}\n" -X POST \
+		"http://localhost:$(APP_PORT)/v1/extract?doc_type=identity_document" \
+		-H "Authorization: Bearer $$token"; \
+	echo "(400 = JWT + scope OK; missing file)"
 
 .PHONY: clean
 clean: ## Remove local build artifacts

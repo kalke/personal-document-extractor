@@ -26,15 +26,6 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	user, err := store.NewUsers(pool).UpsertBySubject(ctx, store.UpsertUserInput{
-		AuthSubject: "oidc|extraction-integration",
-		Email:       "extract@example.com",
-		DisplayName: "Extract Test",
-	})
-	if err != nil {
-		t.Fatalf("user: %v", err)
-	}
-
 	ex := store.NewExtractions(pool)
 	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	rec := store.ExtractionRecord{
@@ -47,8 +38,7 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		RequestID:     "req-1",
 		ClientIP:      "203.0.113.9",
 		UserAgent:     "integration-test",
-		AuthSubject:   user.AuthSubject,
-		UserID:        user.ID,
+		AuthSubject:   "oidc|extraction-integration",
 		Status:        "success",
 		Result: extract.Result{
 			DocType: "identity_document",

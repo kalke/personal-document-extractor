@@ -47,9 +47,9 @@ make setup-oidc            # writes OIDC_ISSUER / OIDC_AUDIENCE into .env
 make auth-up
 make deps-up               # postgres + redis only
 make run                   # API on host (separate terminal)
-make smoke-oidc            # human password token → /v1/me
-make smoke-m2m             # client_credentials → /v1/me
-# or: make me TOKEN=$(make -s auth-token)
+make smoke-oidc            # human password token → extract auth check
+make smoke-m2m             # client_credentials → extract auth check
+# or: make extract TOKEN=$(make -s auth-token) FILE=./doc.pdf
 ```
 
 ```bash
@@ -76,7 +76,7 @@ make destroy               # stop and delete volumes
 | `make destroy` | Stop and remove volumes |
 | `make auth-up` / `auth-down` / `auth-logs` | Manage sibling [`kalke-auth`](../kalke-auth) |
 | `make auth-jwks` / `auth-token` | JWKS check / demo access token |
-| `make smoke-oidc` | Token → `GET /v1/me` |
+| `make smoke-oidc` | Token → `POST /v1/extract` without file (expect 400) |
 | `make logs` | Tail logs (`SERVICE=api` optional) |
 | `make ps` | Compose status |
 | `make build` | Build images |
@@ -84,8 +84,7 @@ make destroy               # stop and delete volumes
 | `make migrations NAME=…` | Create a new SQL migration file |
 | `make health` / `make ready` | Hit `/health` and `/ready` |
 | `make auth-token` / `auth-m2m-token` | Human / M2M JWT from kalke-auth |
-| `make smoke-oidc` / `smoke-m2m` | Token → `GET /v1/me` |
-| `make me` | `GET /v1/me` (`TOKEN=` required) |
+| `make smoke-oidc` / `smoke-m2m` | Token → extract auth smoke (expect 400) |
 | `make extract FILE=…` | `POST /v1/extract` (`TOKEN=` required) |
 | `make lint` | golangci-lint (same as CI) |
 | `make test` | Unit + integration tests (no Docker) |
@@ -168,11 +167,7 @@ make ready
 **Human:** password (dev `kalke-cli`) or Authorization Code + PKCE (`kalke-spa`).  
 **M2M:** Keycloak `client_credentials` (`pde-m2m`) — no proprietary product API keys.
 
-This API keeps a local `users` row keyed by OIDC `sub` (`auth_subject`). There is **no** password and **no** API-key secret stored in Postgres.
-
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/v1/me` | Current user / service-account projection |
+Identity lives in the IdP. This API does **not** keep a local `users` table; successful extracts store the JWT `sub` as `auth_subject` for audit.
 
 `OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` defaults to `extract:write`. `/health` and `/ready` stay public.
 
@@ -188,7 +183,7 @@ When the API runs **inside Docker**, `localhost` is the container — prefer hos
 
 ### Rate limiting
 
-Authenticated extract calls are limited per principal (API key id / JWT `sub`) via Redis fixed 1-minute windows (`RATE_LIMIT_PER_MINUTE`, default **60**). Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. On exceed or Redis failure the API returns **429** (fail-closed) with `Retry-After`.
+Authenticated extract calls are limited per principal (JWT `sub`) via Redis fixed 1-minute windows (`RATE_LIMIT_PER_MINUTE`, default **60**). Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. On exceed or Redis failure the API returns **429** (fail-closed) with `Retry-After`.
 
 ### `POST /v1/extract`
 
@@ -304,7 +299,7 @@ make ci            # lint + test + binary build
 ```
 
 - **Unit tests** cover config, normalize, doctype `Normalize`, extract JSON decoding, cache keys, and fail-open nil paths.
-- **Integration tests** exercise `/health`, `/ready`, `/v1/extract`, `/v1/me`, and `/v1/api-keys` with fakes + [miniredis](https://github.com/alicebob/miniredis). Store tests run against real Postgres when `DATABASE_URL` is set (CI).
+- **Integration tests** exercise `/health`, `/ready`, and `/v1/extract` with fakes + [miniredis](https://github.com/alicebob/miniredis). Store tests run against real Postgres when `DATABASE_URL` is set (CI).
 
 GitHub Actions runs **lint**, **goose migrate** against a Postgres 18 service, **`make test`** (including store integration tests when `DATABASE_URL` is set), binary builds, then **`docker build`**. Locally, `make ci` covers lint + test + build without Docker; set `DATABASE_URL` to exercise Postgres integration tests.
 
@@ -322,11 +317,10 @@ cmd/migrate             goose up CLI
 internal/config         Env
 internal/db             pgx pool
 internal/auth           OIDC JWT (JWKS discovery)
-internal/identity       JWT → local users upsert
 internal/authz          Scope checks
 internal/ratelimit      Redis per-principal limiter
 internal/cache          Redis extract cache
-internal/store          users, extractions
+internal/store          extractions
 internal/httpapi        /health, /ready, /v1/*
 internal/preprocess     validation, PDF render, image compact
 internal/normalize      CPF/CNPJ/CEP/date helpers

@@ -28,10 +28,6 @@ type ExtractionStore interface {
 	Replace(ctx context.Context, rec store.ExtractionRecord) error
 }
 
-type UserStore interface {
-	GetByID(ctx context.Context, id string) (store.User, error)
-}
-
 type DBPinger interface {
 	Ping(ctx context.Context) error
 }
@@ -49,7 +45,6 @@ type Deps struct {
 	Pool           DBPinger
 	Cache          ResultCache
 	Extractions    ExtractionStore
-	Users          UserStore
 	TrustedProxies []*net.IPNet
 	Auth           Authenticator
 	RateLimit      RateLimiter

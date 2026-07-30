@@ -49,41 +49,16 @@ func (allowAllLimiter) Allow(context.Context, string, string) (ratelimit.Result,
 	return ratelimit.Result{Allowed: true, Limit: 1000, Remaining: 999}, nil
 }
 
-const testUserID = "00000000-0000-0000-0000-0000000000aa"
-
 func defaultTestAuth() *stubAuth {
 	return &stubAuth{
 		principals: map[string]auth.Principal{
 			testBearer: {
 				Subject: "oidc|test",
 				Kind:    auth.KindJWT,
-				UserID:  testUserID,
 				Scopes:  []string{auth.ScopeExtractWrite},
 			},
 		},
 	}
-}
-
-type memoryUsers struct {
-	byID map[string]store.User
-}
-
-func (m *memoryUsers) GetByID(_ context.Context, id string) (store.User, error) {
-	if u, ok := m.byID[id]; ok {
-		return u, nil
-	}
-	return store.User{}, errors.New("user not found")
-}
-
-func defaultTestUsers() *memoryUsers {
-	return &memoryUsers{byID: map[string]store.User{
-		testUserID: {
-			ID:          testUserID,
-			AuthSubject: "oidc|test",
-			Email:       "test@example.com",
-			Status:      "active",
-		},
-	}}
 }
 
 type stubExtractor struct {
@@ -161,9 +136,6 @@ func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	if deps.RateLimit == nil {
 		deps.RateLimit = allowAllLimiter{}
 	}
-	if deps.Users == nil {
-		deps.Users = defaultTestUsers()
-	}
 	h, err := httpapi.New(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -181,12 +153,11 @@ func TestNewRequiresDeps(t *testing.T) {
 	if _, err := httpapi.New(httpapi.Deps{Extractor: &stubExtractor{}, Auth: defaultTestAuth()}); err == nil {
 		t.Fatal("expected error for missing rate limiter")
 	}
-	base := httpapi.Deps{Extractor: &stubExtractor{}, Auth: defaultTestAuth(), RateLimit: allowAllLimiter{}}
-	if _, err := httpapi.New(base); err == nil {
-		t.Fatal("expected error for missing users")
-	}
-	base.Users = defaultTestUsers()
-	if _, err := httpapi.New(base); err != nil {
+	if _, err := httpapi.New(httpapi.Deps{
+		Extractor: &stubExtractor{},
+		Auth:      defaultTestAuth(),
+		RateLimit: allowAllLimiter{},
+	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -229,7 +200,6 @@ func TestExtractAdminScopeAllowed(t *testing.T) {
 			testBearer: {
 				Subject: "oidc|admin",
 				Kind:    auth.KindJWT,
-				UserID:  testUserID,
 				Scopes:  []string{auth.ScopeAdmin},
 			},
 		}},
@@ -389,8 +359,8 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if st.rows[0].ClientIP == "" {
 		t.Fatal("expected client_ip persisted")
 	}
-	if st.rows[0].AuthSubject == "" || st.rows[0].UserID == "" {
-		t.Fatalf("expected principal persisted: %+v", st.rows[0])
+	if st.rows[0].AuthSubject == "" {
+		t.Fatalf("expected auth_subject persisted: %+v", st.rows[0])
 	}
 
 	rec = httptest.NewRecorder()

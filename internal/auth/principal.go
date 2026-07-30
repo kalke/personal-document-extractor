@@ -4,9 +4,7 @@ import "context"
 
 type Kind string
 
-const (
-	KindJWT Kind = "jwt"
-)
+const KindJWT Kind = "jwt"
 
 const (
 	ScopeExtractWrite = "extract:write"
@@ -16,7 +14,6 @@ const (
 type Principal struct {
 	Subject string
 	Kind    Kind
-	UserID  string
 	Scopes  []string
 }
 
