@@ -113,7 +113,7 @@ func (m *memoryAPIKeys) Create(_ context.Context, in store.CreateAPIKeyInput) (a
 	m.keys = append(m.keys, pub)
 	return auth.APIKeyRecord{
 		ID: id, UserID: in.UserID, Name: in.Name, KeyPrefix: in.KeyPrefix,
-		KeyHash: in.KeyHash, Scopes: in.Scopes,
+		KeyHash: in.KeyHash, Scopes: in.Scopes, CreatedAt: pub.CreatedAt,
 	}, nil
 }
 
@@ -133,13 +133,13 @@ func (m *memoryAPIKeys) RevokeForUser(_ context.Context, userID, keyID string) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.keys {
-		if m.keys[i].ID == keyID && m.keys[i].UserID == userID {
+		if m.keys[i].ID == keyID && m.keys[i].UserID == userID && m.keys[i].RevokedAt == nil {
 			now := time.Now().UTC()
 			m.keys[i].RevokedAt = &now
 			return nil
 		}
 	}
-	return errors.New("api key not found")
+	return store.ErrAPIKeyNotFound
 }
 
 type stubExtractor struct {

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/kalke/personal-document-extractor/internal/auth"
+	"github.com/kalke/personal-document-extractor/internal/authz"
 	"github.com/kalke/personal-document-extractor/internal/store"
 )
 
@@ -35,6 +38,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.users.GetByID(r.Context(), p.UserID)
 	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if u.Status != "active" {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -94,8 +101,10 @@ func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createAPIKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeErr(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
@@ -108,7 +117,7 @@ func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		scopes = []string{auth.ScopeExtractWrite}
 	}
 	for _, sc := range scopes {
-		if sc == auth.ScopeAdmin && !authzHasAdmin(p) {
+		if sc == auth.ScopeAdmin && !authz.HasScope(p, auth.ScopeAdmin) {
 			writeErr(w, http.StatusForbidden, "cannot create admin keys")
 			return
 		}
@@ -142,7 +151,7 @@ func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 			KeyPrefix: rec.KeyPrefix,
 			Scopes:    rec.Scopes,
 			ExpiresAt: rec.ExpiresAt,
-			CreatedAt: time.Now().UTC(),
+			CreatedAt: rec.CreatedAt,
 		},
 		Secret: plaintext,
 	})
@@ -160,7 +169,11 @@ func (s *Server) revokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.apiKeys.RevokeForUser(r.Context(), p.UserID, id); err != nil {
-		writeErr(w, http.StatusNotFound, "api key not found")
+		if errors.Is(err, store.ErrAPIKeyNotFound) {
+			writeErr(w, http.StatusNotFound, "api key not found")
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "could not revoke api key")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -176,13 +189,4 @@ func toAPIKeyResponse(k store.APIKeyPublic) apiKeyResponse {
 		RevokedAt: k.RevokedAt,
 		CreatedAt: k.CreatedAt,
 	}
-}
-
-func authzHasAdmin(p auth.Principal) bool {
-	for _, s := range p.Scopes {
-		if s == auth.ScopeAdmin {
-			return true
-		}
-	}
-	return false
 }

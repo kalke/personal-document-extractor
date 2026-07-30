@@ -46,6 +46,14 @@ func (s *Users) UpsertBySubject(ctx context.Context, in UpsertUserInput) (User, 
 	if in.AuthSubject == "" {
 		return User{}, fmt.Errorf("auth_subject is required")
 	}
+
+	if existing, err := s.GetBySubject(ctx, in.AuthSubject); err == nil {
+		if existing.Status != "active" {
+			return existing, nil
+		}
+		return s.updateActive(ctx, existing.ID, in)
+	}
+
 	var email any
 	if in.Email != "" {
 		email = in.Email
@@ -60,10 +68,10 @@ func (s *Users) UpsertBySubject(ctx context.Context, in UpsertUserInput) (User, 
 		VALUES ($1, $2, $3, $4, now(), now())
 		ON CONFLICT (auth_subject) DO UPDATE SET
 			email = COALESCE(EXCLUDED.email, users.email),
-			email_verified = EXCLUDED.email_verified,
+			email_verified = users.email_verified OR EXCLUDED.email_verified,
 			display_name = COALESCE(EXCLUDED.display_name, users.display_name),
-			last_login_at = now(),
-			updated_at = now()
+			last_login_at = CASE WHEN users.status = 'active' THEN now() ELSE users.last_login_at END,
+			updated_at = CASE WHEN users.status = 'active' THEN now() ELSE users.updated_at END
 		RETURNING id::text, auth_subject, COALESCE(email, ''), email_verified,
 			COALESCE(display_name, ''), status, created_at, updated_at, last_login_at
 	`, in.AuthSubject, email, in.EmailVerified, display).Scan(
@@ -79,6 +87,46 @@ func (s *Users) UpsertBySubject(ctx context.Context, in UpsertUserInput) (User, 
 	)
 	if err != nil {
 		return User{}, fmt.Errorf("upsert user: %w", err)
+	}
+	return u, nil
+}
+
+func (s *Users) updateActive(ctx context.Context, id string, in UpsertUserInput) (User, error) {
+	var email any
+	if in.Email != "" {
+		email = in.Email
+	}
+	var display any
+	if in.DisplayName != "" {
+		display = in.DisplayName
+	}
+	var u User
+	err := s.pool.QueryRow(ctx, `
+		UPDATE users SET
+			email = COALESCE($2, email),
+			email_verified = email_verified OR $3,
+			display_name = COALESCE($4, display_name),
+			last_login_at = now(),
+			updated_at = now()
+		WHERE id = $1 AND status = 'active'
+		RETURNING id::text, auth_subject, COALESCE(email, ''), email_verified,
+			COALESCE(display_name, ''), status, created_at, updated_at, last_login_at
+	`, id, email, in.EmailVerified, display).Scan(
+		&u.ID,
+		&u.AuthSubject,
+		&u.Email,
+		&u.EmailVerified,
+		&u.DisplayName,
+		&u.Status,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+		&u.LastLoginAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.GetByID(ctx, id)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("update user: %w", err)
 	}
 	return u, nil
 }

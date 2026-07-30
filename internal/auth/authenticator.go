@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,15 +26,18 @@ type APIKeyRecord struct {
 	Scopes    []string
 	ExpiresAt *time.Time
 	RevokedAt *time.Time
+	CreatedAt time.Time
 }
 
 type APIKeyLookup interface {
 	LookupByPrefix(ctx context.Context, prefix string) (APIKeyRecord, error)
 }
 
-// UserSync upserts the local users projection for JWT principals.
+// UserSync upserts the local users projection for JWT principals
+// and checks account status for API-key principals.
 type UserSync interface {
 	UpsertFromAuth(ctx context.Context, in UserSyncInput) (userID string, err error)
+	EnsureActive(ctx context.Context, userID string) error
 }
 
 type UserSyncInput struct {
@@ -115,8 +119,14 @@ func (a *Authenticator) authenticateAPIKey(ctx context.Context, plaintext string
 	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
 		return Principal{}, ErrUnauthorized
 	}
-	if rec.KeyHash != HashAPIKey(plaintext) {
+	want := HashAPIKey(plaintext)
+	if subtle.ConstantTimeCompare([]byte(rec.KeyHash), []byte(want)) != 1 {
 		return Principal{}, ErrUnauthorized
+	}
+	if a.users != nil && rec.UserID != "" {
+		if err := a.users.EnsureActive(ctx, rec.UserID); err != nil {
+			return Principal{}, ErrUnauthorized
+		}
 	}
 	return Principal{
 		Subject:  "api_key:" + rec.ID,

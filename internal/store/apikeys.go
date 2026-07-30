@@ -48,7 +48,6 @@ func (s *APIKeys) Create(ctx context.Context, in CreateAPIKeyInput) (auth.APIKey
 		return auth.APIKeyRecord{}, fmt.Errorf("user_id is required")
 	}
 	var rec auth.APIKeyRecord
-	var createdAt time.Time
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO api_keys (user_id, name, key_prefix, key_hash, scopes, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -62,7 +61,7 @@ func (s *APIKeys) Create(ctx context.Context, in CreateAPIKeyInput) (auth.APIKey
 		&rec.Scopes,
 		&rec.ExpiresAt,
 		&rec.RevokedAt,
-		&createdAt,
+		&rec.CreatedAt,
 	)
 	if err != nil {
 		return auth.APIKeyRecord{}, fmt.Errorf("insert api key: %w", err)
@@ -134,6 +133,8 @@ func (s *APIKeys) ListByUser(ctx context.Context, userID string) ([]APIKeyPublic
 	return out, rows.Err()
 }
 
+var ErrAPIKeyNotFound = errors.New("api key not found")
+
 func (s *APIKeys) RevokeForUser(ctx context.Context, userID, keyID string) error {
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("store not configured")
@@ -147,7 +148,7 @@ func (s *APIKeys) RevokeForUser(ctx context.Context, userID, keyID string) error
 		return fmt.Errorf("revoke api key: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("api key not found")
+		return ErrAPIKeyNotFound
 	}
 	return nil
 }
