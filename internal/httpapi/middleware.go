@@ -57,7 +57,8 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		}
 		id := p.Subject
 		if id == "" {
-			id = p.APIKeyID
+			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			return
 		}
 		res, err := s.limiter.Allow(r.Context(), string(p.Kind), id)
 		if err != nil {

@@ -10,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const SystemOpsSubject = "system:ops"
-
 type Users struct {
 	pool *pgxpool.Pool
 }
@@ -187,16 +185,4 @@ func (s *Users) GetBySubject(ctx context.Context, subject string) (User, error) 
 		return User{}, fmt.Errorf("get user by subject: %w", err)
 	}
 	return u, nil
-}
-
-// EnsureSystemOps returns the bootstrap ops user (created by migration).
-func (s *Users) EnsureSystemOps(ctx context.Context) (User, error) {
-	u, err := s.GetBySubject(ctx, SystemOpsSubject)
-	if err == nil {
-		return u, nil
-	}
-	return s.UpsertBySubject(ctx, UpsertUserInput{
-		AuthSubject: SystemOpsSubject,
-		DisplayName: "System Ops",
-	})
 }
