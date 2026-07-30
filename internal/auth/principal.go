@@ -18,6 +18,7 @@ const (
 type Principal struct {
 	Subject  string
 	Kind     Kind
+	UserID   string
 	APIKeyID string
 	Scopes   []string
 }

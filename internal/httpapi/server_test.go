@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -49,17 +51,95 @@ func (allowAllLimiter) Allow(context.Context, string, string) (ratelimit.Result,
 	return ratelimit.Result{Allowed: true, Limit: 1000, Remaining: 999}, nil
 }
 
+const testUserID = "00000000-0000-0000-0000-0000000000aa"
+
 func defaultTestAuth() *stubAuth {
 	return &stubAuth{
 		principals: map[string]auth.Principal{
 			testBearer: {
 				Subject:  "api_key:test",
 				Kind:     auth.KindAPIKey,
+				UserID:   testUserID,
 				APIKeyID: "00000000-0000-0000-0000-000000000001",
-				Scopes:   []string{auth.ScopeExtractWrite},
+				Scopes:   []string{auth.ScopeExtractWrite, auth.ScopeKeysManage},
 			},
 		},
 	}
+}
+
+type memoryUsers struct {
+	byID map[string]store.User
+}
+
+func (m *memoryUsers) GetByID(_ context.Context, id string) (store.User, error) {
+	if u, ok := m.byID[id]; ok {
+		return u, nil
+	}
+	return store.User{}, errors.New("user not found")
+}
+
+func defaultTestUsers() *memoryUsers {
+	return &memoryUsers{byID: map[string]store.User{
+		testUserID: {
+			ID:          testUserID,
+			AuthSubject: "auth0|test",
+			Email:       "test@example.com",
+			Status:      "active",
+		},
+	}}
+}
+
+type memoryAPIKeys struct {
+	mu   sync.Mutex
+	keys []store.APIKeyPublic
+	err  error
+}
+
+func (m *memoryAPIKeys) Create(_ context.Context, in store.CreateAPIKeyInput) (auth.APIKeyRecord, error) {
+	if m.err != nil {
+		return auth.APIKeyRecord{}, m.err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := fmt.Sprintf("key-%d", len(m.keys)+1)
+	pub := store.APIKeyPublic{
+		ID:        id,
+		UserID:    in.UserID,
+		Name:      in.Name,
+		KeyPrefix: in.KeyPrefix,
+		Scopes:    in.Scopes,
+		CreatedAt: time.Now().UTC(),
+	}
+	m.keys = append(m.keys, pub)
+	return auth.APIKeyRecord{
+		ID: id, UserID: in.UserID, Name: in.Name, KeyPrefix: in.KeyPrefix,
+		KeyHash: in.KeyHash, Scopes: in.Scopes,
+	}, nil
+}
+
+func (m *memoryAPIKeys) ListByUser(_ context.Context, userID string) ([]store.APIKeyPublic, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []store.APIKeyPublic
+	for _, k := range m.keys {
+		if k.UserID == userID {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+func (m *memoryAPIKeys) RevokeForUser(_ context.Context, userID, keyID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.keys {
+		if m.keys[i].ID == keyID && m.keys[i].UserID == userID {
+			now := time.Now().UTC()
+			m.keys[i].RevokedAt = &now
+			return nil
+		}
+	}
+	return errors.New("api key not found")
 }
 
 type stubExtractor struct {
@@ -137,6 +217,12 @@ func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	if deps.RateLimit == nil {
 		deps.RateLimit = allowAllLimiter{}
 	}
+	if deps.Users == nil {
+		deps.Users = defaultTestUsers()
+	}
+	if deps.APIKeys == nil {
+		deps.APIKeys = &memoryAPIKeys{}
+	}
 	h, err := httpapi.New(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +239,94 @@ func TestNewRequiresDeps(t *testing.T) {
 	}
 	if _, err := httpapi.New(httpapi.Deps{Extractor: &stubExtractor{}, Auth: defaultTestAuth()}); err == nil {
 		t.Fatal("expected error for missing rate limiter")
+	}
+	base := httpapi.Deps{Extractor: &stubExtractor{}, Auth: defaultTestAuth(), RateLimit: allowAllLimiter{}}
+	if _, err := httpapi.New(base); err == nil {
+		t.Fatal("expected error for missing users")
+	}
+	base.Users = defaultTestUsers()
+	if _, err := httpapi.New(base); err == nil {
+		t.Fatal("expected error for missing api keys")
+	}
+}
+
+func TestMeAndAPIKeys(t *testing.T) {
+	keys := &memoryAPIKeys{}
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{},
+		APIKeys:   keys,
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {
+				Subject: "auth0|test",
+				Kind:    auth.KindJWT,
+				UserID:  testUserID,
+				Scopes:  []string{auth.ScopeExtractWrite, auth.ScopeKeysManage},
+			},
+		}},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("me status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	body := strings.NewReader(`{"name":"web","scopes":["extract:write"]}`)
+	req = httptest.NewRequest(http.MethodPost, "/v1/api-keys", body)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status %d body %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created["secret"] == nil || created["key_prefix"] == nil {
+		t.Fatalf("missing secret/prefix: %v", created)
+	}
+	id, _ := created["id"].(string)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/api-keys", nil)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/v1/api-keys/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke status %d", rec.Code)
+	}
+}
+
+func TestCreateAPIKeyForbidsAdminScope(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{},
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {
+				Subject: "auth0|test",
+				Kind:    auth.KindJWT,
+				UserID:  testUserID,
+				Scopes:  []string{auth.ScopeKeysManage},
+			},
+		}},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/api-keys", strings.NewReader(`{"scopes":["admin"]}`))
+	req.Header.Set("Authorization", "Bearer "+testBearer)
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d", rec.Code)
 	}
 }
 
@@ -194,6 +368,7 @@ func TestExtractAdminScopeAllowed(t *testing.T) {
 			testBearer: {
 				Subject:  "api_key:admin",
 				Kind:     auth.KindAPIKey,
+				UserID:   testUserID,
 				APIKeyID: "00000000-0000-0000-0000-000000000099",
 				Scopes:   []string{auth.ScopeAdmin},
 			},
@@ -354,7 +529,7 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if st.rows[0].ClientIP == "" {
 		t.Fatal("expected client_ip persisted")
 	}
-	if st.rows[0].AuthSubject == "" || st.rows[0].APIKeyID == "" {
+	if st.rows[0].AuthSubject == "" || st.rows[0].APIKeyID == "" || st.rows[0].UserID == "" {
 		t.Fatalf("expected principal persisted: %+v", st.rows[0])
 	}
 

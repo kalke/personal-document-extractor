@@ -22,6 +22,7 @@ import (
 	"github.com/kalke/personal-document-extractor/internal/doctypes/invoice_nf"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/httpapi"
+	"github.com/kalke/personal-document-extractor/internal/identity"
 	"github.com/kalke/personal-document-extractor/internal/llm/groq"
 	"github.com/kalke/personal-document-extractor/internal/migrate"
 	"github.com/kalke/personal-document-extractor/internal/ratelimit"
@@ -68,8 +69,11 @@ func main() {
 		invoice_nf.DocType{},
 	)
 
+	users := store.NewUsers(pool)
+	apiKeys := store.NewAPIKeys(pool)
 	authenticator, err := auth.NewAuthenticator(auth.Options{
-		Keys:     store.NewAPIKeys(pool),
+		Keys:     apiKeys,
+		Users:    identity.Directory{Users: users},
 		Domain:   cfg.Auth0Domain,
 		Audience: cfg.Auth0Audience,
 	})
@@ -84,6 +88,8 @@ func main() {
 		Pool:           pool,
 		Cache:          redisCache,
 		Extractions:    store.NewExtractions(pool),
+		Users:          users,
+		APIKeys:        apiKeys,
 		TrustedProxies: cfg.TrustedProxies,
 		Auth:           authenticator,
 		RateLimit:      limiter,

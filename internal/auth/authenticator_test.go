@@ -29,6 +29,7 @@ func TestAuthenticatorAPIKey(t *testing.T) {
 		Keys: &memKeys{byPrefix: map[string]auth.APIKeyRecord{
 			prefix: {
 				ID:        "11111111-1111-1111-1111-111111111111",
+				UserID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 				KeyPrefix: prefix,
 				KeyHash:   hash,
 				Scopes:    []string{auth.ScopeExtractWrite},
@@ -42,7 +43,7 @@ func TestAuthenticatorAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Kind != auth.KindAPIKey || p.APIKeyID == "" || len(p.Scopes) != 1 {
+	if p.Kind != auth.KindAPIKey || p.APIKeyID == "" || p.UserID == "" || len(p.Scopes) != 1 {
 		t.Fatalf("%+v", p)
 	}
 

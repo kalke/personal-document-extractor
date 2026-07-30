@@ -34,6 +34,8 @@ type Server struct {
 	pool           DBPinger
 	cache          ResultCache
 	extractions    ExtractionStore
+	users          UserStore
+	apiKeys        APIKeyStore
 	trustedProxies []*net.IPNet
 	auth           Authenticator
 	limiter        RateLimiter
@@ -49,6 +51,12 @@ func New(deps Deps) (http.Handler, error) {
 	if deps.RateLimit == nil {
 		return nil, fmt.Errorf("rate limiter is required")
 	}
+	if deps.Users == nil {
+		return nil, fmt.Errorf("users store is required")
+	}
+	if deps.APIKeys == nil {
+		return nil, fmt.Errorf("api keys store is required")
+	}
 	scope := deps.RequiredScope
 	if scope == "" {
 		scope = auth.ScopeExtractWrite
@@ -58,6 +66,8 @@ func New(deps Deps) (http.Handler, error) {
 		pool:           deps.Pool,
 		cache:          deps.Cache,
 		extractions:    deps.Extractions,
+		users:          deps.Users,
+		apiKeys:        deps.APIKeys,
 		trustedProxies: deps.TrustedProxies,
 		auth:           deps.Auth,
 		limiter:        deps.RateLimit,
@@ -71,9 +81,18 @@ func New(deps Deps) (http.Handler, error) {
 	r.Get("/ready", s.ready)
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
-		r.Use(s.requireScope(scope))
-		r.Use(s.rateLimit)
-		r.Post("/extract", s.extract)
+		r.Get("/me", s.me)
+		r.Route("/api-keys", func(r chi.Router) {
+			r.Use(s.requireScope(auth.ScopeKeysManage))
+			r.Get("/", s.listAPIKeys)
+			r.Post("/", s.createAPIKey)
+			r.Delete("/{id}", s.revokeAPIKey)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireScope(scope))
+			r.Use(s.rateLimit)
+			r.Post("/extract", s.extract)
+		})
 	})
 	return r, nil
 }
@@ -187,10 +206,11 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	result.Meta.ContentSHA256 = shaHex
 	result.Meta.Cache = "miss"
-	var apiKeyID, authSubject string
+	var apiKeyID, authSubject, userID string
 	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
 		apiKeyID = p.APIKeyID
 		authSubject = p.Subject
+		userID = p.UserID
 	}
 	s.persist(persistArgs{
 		reqID:       reqID,
@@ -205,6 +225,7 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		userAgent:   userAgent,
 		apiKeyID:    apiKeyID,
 		authSubject: authSubject,
+		userID:      userID,
 		log:         log,
 	})
 	log.Info("extract", "cache", "miss", "mode", result.Meta.Mode, "images", result.Meta.Images)
@@ -224,6 +245,7 @@ type persistArgs struct {
 	userAgent   string
 	apiKeyID    string
 	authSubject string
+	userID      string
 	log         *slog.Logger
 }
 
@@ -266,6 +288,7 @@ func (s *Server) persist(args persistArgs) {
 		UserAgent:     args.userAgent,
 		APIKeyID:      args.apiKeyID,
 		AuthSubject:   args.authSubject,
+		UserID:        args.userID,
 		Status:        "success",
 		Result:        args.result,
 		Duration:      args.duration,

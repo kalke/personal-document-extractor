@@ -28,6 +28,16 @@ type ExtractionStore interface {
 	Replace(ctx context.Context, rec store.ExtractionRecord) error
 }
 
+type UserStore interface {
+	GetByID(ctx context.Context, id string) (store.User, error)
+}
+
+type APIKeyStore interface {
+	Create(ctx context.Context, in store.CreateAPIKeyInput) (auth.APIKeyRecord, error)
+	ListByUser(ctx context.Context, userID string) ([]store.APIKeyPublic, error)
+	RevokeForUser(ctx context.Context, userID, keyID string) error
+}
+
 type DBPinger interface {
 	Ping(ctx context.Context) error
 }
@@ -45,6 +55,8 @@ type Deps struct {
 	Pool           DBPinger
 	Cache          ResultCache
 	Extractions    ExtractionStore
+	Users          UserStore
+	APIKeys        APIKeyStore
 	TrustedProxies []*net.IPNet
 	Auth           Authenticator
 	RateLimit      RateLimiter

@@ -59,7 +59,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	ops, err := store.NewUsers(pool).EnsureSystemOps(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "system user: %v\n", err)
+		os.Exit(1)
+	}
+
 	rec, err := store.NewAPIKeys(pool).Create(ctx, store.CreateAPIKeyInput{
+		UserID:    ops.ID,
 		Name:      strings.TrimSpace(*name),
 		KeyPrefix: prefix,
 		KeyHash:   hash,
@@ -70,7 +77,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Created API key %s (%s)\n", rec.ID, rec.Name)
+	fmt.Printf("Created API key %s (%s) for user %s\n", rec.ID, rec.Name, ops.AuthSubject)
 	fmt.Printf("Prefix:  %s\n", rec.KeyPrefix)
 	fmt.Printf("Scopes:  %s\n", strings.Join(rec.Scopes, ","))
 	fmt.Println("Secret (store securely; shown once):")
