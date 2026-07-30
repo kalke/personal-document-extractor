@@ -33,7 +33,13 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 	}
 	_ = plain
 
+	ops, err := store.NewUsers(pool).EnsureSystemOps(ctx)
+	if err != nil {
+		t.Fatalf("system user: %v", err)
+	}
+
 	keyRec, err := store.NewAPIKeys(pool).Create(ctx, store.CreateAPIKeyInput{
+		UserID:    ops.ID,
 		Name:      "integration",
 		KeyPrefix: prefix,
 		KeyHash:   hash,
@@ -57,6 +63,7 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		UserAgent:     "integration-test",
 		APIKeyID:      keyRec.ID,
 		AuthSubject:   "api_key:" + keyRec.ID,
+		UserID:        ops.ID,
 		Status:        "success",
 		Result: extract.Result{
 			DocType: "identity_document",
