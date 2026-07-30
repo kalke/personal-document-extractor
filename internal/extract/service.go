@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/kalke/personal-document-extractor/internal/llm/groq"
 	"github.com/kalke/personal-document-extractor/internal/preprocess"
 )
 
@@ -19,6 +19,11 @@ var (
 	ErrInvalidJSON    = errors.New("llm returned invalid json")
 	ErrLLM            = errors.New("llm request failed")
 )
+
+type LLM interface {
+	Model() string
+	Chat(ctx context.Context, system string, user any, jsonMode bool) (string, error)
+}
 
 type DocType interface {
 	Name() string
@@ -35,19 +40,31 @@ type Result struct {
 }
 
 type Meta struct {
-	Model    string `json:"model"`
-	Chars    int    `json:"chars"`
-	Mode     string `json:"mode"`
-	Images   int    `json:"images"`
-	Filename string `json:"filename,omitempty"`
+	Model         string `json:"model"`
+	Chars         int    `json:"chars"`
+	Mode          string `json:"mode"`
+	Images        int    `json:"images"`
+	Filename      string `json:"filename,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
+	Cache         string `json:"cache,omitempty"`
+}
+
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL string `json:"url"`
 }
 
 type Service struct {
-	llm      *groq.Client
+	llm      LLM
 	registry map[string]DocType
 }
 
-func NewService(llm *groq.Client, types ...DocType) *Service {
+func NewService(llm LLM, types ...DocType) *Service {
 	reg := make(map[string]DocType, len(types))
 	for _, t := range types {
 		reg[t.Name()] = t
@@ -60,6 +77,7 @@ func (s *Service) KnownTypes() []string {
 	for k := range s.registry {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -79,14 +97,10 @@ func (s *Service) Extract(ctx context.Context, docType string, doc preprocess.Pr
 		"images", len(doc.Images),
 	)
 
-	messages := []groq.Message{
-		{Role: "system", Content: dt.SystemPrompt()},
-		{Role: "user", Content: buildUserContent(dt, doc)},
-	}
-
-	content, err := s.llm.Chat(ctx, messages)
+	jsonMode := doc.Mode == "text"
+	content, err := s.llm.Chat(ctx, dt.SystemPrompt(), buildUserContent(dt, doc), jsonMode)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %v", ErrLLM, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrLLM, err)
 	}
 
 	parsed, err := decodeInto(dt, content)
@@ -98,14 +112,14 @@ func (s *Service) Extract(ctx context.Context, docType string, doc preprocess.Pr
 		)
 		repaired, repairErr := s.repairJSON(ctx, dt, content)
 		if repairErr != nil {
-			return Result{}, fmt.Errorf("%w: %v (repair failed: %v)", ErrInvalidJSON, err, repairErr)
+			return Result{}, fmt.Errorf("%w: %w", ErrInvalidJSON, errors.Join(err, repairErr))
 		}
 		parsed = repaired
 	}
 
 	dt.Normalize(parsed)
 
-	slog.Info("extract ok",
+	slog.Debug("extract ok",
 		"doc_type", docType,
 		"mode", doc.Mode,
 		"images", len(doc.Images),
@@ -127,10 +141,11 @@ func (s *Service) Extract(ctx context.Context, docType string, doc preprocess.Pr
 }
 
 func (s *Service) repairJSON(ctx context.Context, dt DocType, broken string) (any, error) {
-	content, err := s.llm.Chat(ctx, []groq.Message{
-		{Role: "system", Content: "You fix malformed JSON. Return ONLY valid JSON matching the schema. No markdown."},
-		{Role: "user", Content: fmt.Sprintf("Schema:\n%s\n\nBroken JSON:\n%s", dt.SchemaHint(), broken)},
-	})
+	content, err := s.llm.Chat(ctx,
+		"You fix malformed JSON. Return ONLY valid JSON matching the schema. No markdown.",
+		fmt.Sprintf("Schema:\n%s\n\nBroken JSON:\n%s", dt.SchemaHint(), broken),
+		true,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +158,16 @@ func buildUserContent(dt DocType, doc preprocess.PreparedDocument) any {
 		return prompt
 	}
 
-	parts := []groq.ContentPart{{Type: "text", Text: prompt}}
+	parts := []ContentPart{{Type: "text", Text: prompt}}
 	for _, img := range doc.Images {
 		mime := img.MIME
 		if mime == "" {
 			mime = "image/png"
 		}
 		dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(img.Data))
-		parts = append(parts, groq.ContentPart{
+		parts = append(parts, ContentPart{
 			Type:     "image_url",
-			ImageURL: &groq.ImageURL{URL: dataURL},
+			ImageURL: &ImageURL{URL: dataURL},
 		})
 	}
 	return parts
@@ -170,11 +185,6 @@ func buildUserPrompt(dt DocType, doc preprocess.PreparedDocument) string {
 	b.WriteString("Return ONLY a single JSON object matching this schema:\n\n")
 	b.WriteString(dt.SchemaHint())
 	b.WriteString("\n\n")
-	b.WriteString("Important extraction rules:\n")
-	b.WriteString("- CPF: find label \"CPF\" (CNH field 6). Copy ###.###.###-## exactly; 11 digits only. Do not leave empty if readable.\n")
-	b.WriteString("- CNH validade: use field 4b VALIDADE only. Field 4a is emissão — do not put 4a into validade.\n")
-	b.WriteString("- Birth date: field 3 only; double-check each year digit (9 vs 0).\n")
-	b.WriteString("- numero_documento: CNH field 7 Nº REGISTRO (not CPF).\n\n")
 
 	if strings.TrimSpace(doc.Text) != "" && doc.Mode == "text" {
 		b.WriteString("Document text:\n---\n")
