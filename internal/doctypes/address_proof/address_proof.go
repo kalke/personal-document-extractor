@@ -63,15 +63,21 @@ func (DocType) Normalize(result any) {
 	r.Numero = strings.TrimSpace(r.Numero)
 	r.Bairro = strings.TrimSpace(r.Bairro)
 	r.Cidade = strings.TrimSpace(r.Cidade)
-	r.UF = strings.ToUpper(strings.TrimSpace(r.UF))
+	r.UF = canonicalizeUF(r.UF)
 	r.CEP = normalize.CEP(r.CEP)
 	r.Emissor = strings.TrimSpace(r.Emissor)
-	r.Data = normalize.DateToISO(ptrString(r.Data))
+	r.Data = normalize.DateToISO(normalize.Deref(r.Data))
 }
 
-func ptrString(p *string) string {
-	if p == nil {
+func canonicalizeUF(s string) string {
+	uf := strings.ToUpper(strings.TrimSpace(s))
+	if len(uf) != 2 {
 		return ""
 	}
-	return *p
+	for _, c := range uf {
+		if c < 'A' || c > 'Z' {
+			return ""
+		}
+	}
+	return uf
 }

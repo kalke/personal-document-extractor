@@ -70,22 +70,28 @@ func (DocType) Normalize(result any) {
 	if !ok || r == nil {
 		return
 	}
-	r.Tipo = strings.TrimSpace(r.Tipo)
+	r.Tipo = canonicalizeTipo(r.Tipo)
 	r.Nome = strings.TrimSpace(r.Nome)
 	rawCPF := strings.TrimSpace(r.CPF)
 	r.CPF = normalize.CPF(rawCPF)
 	if rawCPF != "" && r.CPF == "" {
 		slog.Warn("cpf rejected by validation", "raw_len", len(normalize.DigitsOnly(rawCPF)))
 	}
-	r.NumeroDocumento = strings.TrimSpace(r.NumeroDocumento)
+	r.NumeroDocumento = normalize.DigitsOnly(r.NumeroDocumento)
 	r.OrgaoEmissor = strings.TrimSpace(r.OrgaoEmissor)
-	r.DataNascimento = normalize.DateToISO(ptrString(r.DataNascimento))
-	r.Validade = normalize.DateToISO(ptrString(r.Validade))
+	r.DataNascimento = normalize.DateToISO(normalize.Deref(r.DataNascimento))
+	r.Validade = normalize.DateToISO(normalize.Deref(r.Validade))
 }
 
-func ptrString(p *string) string {
-	if p == nil {
+func canonicalizeTipo(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "CNH", "CNH-E", "CNHE":
+		return "CNH"
+	case "RG":
+		return "RG"
+	case "":
 		return ""
+	default:
+		return "outro"
 	}
-	return *p
 }

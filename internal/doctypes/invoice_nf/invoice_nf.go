@@ -71,7 +71,7 @@ func (DocType) Normalize(result any) {
 	r.Serie = strings.TrimSpace(r.Serie)
 	r.Emitente = normalizeParty(r.Emitente)
 	r.Destinatario = normalizeParty(r.Destinatario)
-	r.DataEmissao = normalize.DateToISO(ptrString(r.DataEmissao))
+	r.DataEmissao = normalize.DateToISO(normalize.Deref(r.DataEmissao))
 	if r.Itens == nil {
 		r.Itens = []Item{}
 	}
@@ -82,11 +82,4 @@ func normalizeParty(p Party) Party {
 	p.CNPJ = normalize.CNPJ(p.CNPJ)
 	p.CPF = normalize.CPF(p.CPF)
 	return p
-}
-
-func ptrString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
 }

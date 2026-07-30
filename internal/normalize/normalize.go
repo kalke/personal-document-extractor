@@ -15,6 +15,13 @@ func DigitsOnly(s string) string {
 	return nonDigits.ReplaceAllString(s, "")
 }
 
+func Deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 func CPF(s string) string {
 	d := DigitsOnly(s)
 	if !ValidCPF(d) {

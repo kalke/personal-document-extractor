@@ -29,12 +29,12 @@ func TestFindCPF(t *testing.T) {
 
 func TestDateToISO(t *testing.T) {
 	cases := map[string]*string{
-		"15/01/1990":       strPtr("1990-01-15"),
-		"31/12/2030":       strPtr("2030-12-31"),
-		"1990-01-15":       strPtr("1990-01-15"),
+		"15/01/1990":           strPtr("1990-01-15"),
+		"31/12/2030":           strPtr("2030-12-31"),
+		"1990-01-15":           strPtr("1990-01-15"),
 		"15/01/1990 Sao Paulo": strPtr("1990-01-15"),
-		"":                 nil,
-		"not-a-date":       nil,
+		"":                     nil,
+		"not-a-date":           nil,
 	}
 	for in, want := range cases {
 		got := DateToISO(in)
