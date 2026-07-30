@@ -127,10 +127,29 @@ make ready
 | Scope | Allows |
 |---|---|
 | `extract:write` | `POST /v1/extract` |
-| `keys:manage` | Reserved for future key admin HTTP API |
+| `keys:manage` | `GET/POST/DELETE /v1/api-keys` (own keys) |
 | `admin` | All scopes |
 
-API keys are stored as **SHA-256 hashes** with a public prefix for lookup; the secret is shown once by `make apikey` or `make admin`. Auth0 is optional: set both `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` to accept RS256 JWTs (issuer `https://{domain}/`, permissions from the Auth0 RBAC `permissions` claim or space-delimited `scope`). `/health` and `/ready` stay public.
+**Users:** Auth0 is the identity provider (email/password via Auth0 Database now; Google/GitHub/Apple + MFA later). This API keeps a local `users` row keyed by Auth0 `sub` (`auth_subject`) and owns `api_keys.user_id`. There is **no** password stored in Postgres.
+
+On JWT auth the API upserts `users` and exposes:
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/me` | Current user profile |
+| `GET` | `/v1/api-keys` | List own keys (prefix only) |
+| `POST` | `/v1/api-keys` | Create key for self (default scope `extract:write`; secret once) |
+| `DELETE` | `/v1/api-keys/{id}` | Revoke own key |
+
+API keys are **SHA-256 hashed** with a public prefix. Bootstrap ops keys: `make apikey` / `make admin` (attached to `system:ops`). Set `AUTH0_DOMAIN` + `AUTH0_AUDIENCE` for JWT. If the token has no `permissions`, the API grants default `extract:write` + `keys:manage`. `/health` and `/ready` stay public.
+
+#### Auth0 setup (website-ready)
+
+1. Create an Auth0 API; set audience = `AUTH0_AUDIENCE`.
+2. Enable a **Database** connection (email/password) — login first.
+3. Later: enable Google / GitHub / Apple; enable MFA in Auth0.
+4. SPA: Authorization Code + PKCE; send access token as `Authorization: Bearer`.
+5. Optional Auth0 RBAC: permissions `extract:write`, `keys:manage`.
 
 ### Rate limiting
 
@@ -267,11 +286,12 @@ cmd/apikey              Create API keys (secret once)
 internal/config         Env
 internal/db             pgx pool
 internal/auth           API keys + Auth0 JWT
+internal/identity       JWT → local users upsert
 internal/authz          Scope checks
 internal/ratelimit      Redis per-principal limiter
 internal/cache          Redis extract cache
-internal/store          Postgres extractions + api_keys
-internal/httpapi        /health, /ready, /v1/extract
+internal/store          users, api_keys, extractions
+internal/httpapi        /health, /ready, /v1/*
 internal/preprocess     validation, PDF render, image compact
 internal/normalize      CPF/CNPJ/CEP/date helpers
 internal/llm/groq       Groq client
@@ -281,10 +301,11 @@ internal/doctypes/*     Per-type schema + prompts
 
 ## Roadmap (intentionally out of v1)
 
-- Auth0 login UI / dashboard
-- HTTP API for key admin (`keys:manage`)
+- Website / Auth0 Universal Login UI (Next.js SPA)
+- Apple / Google / GitHub buttons (Auth0 social connections)
+- Web3 wallet linking (`user_identities` when needed)
 - Fine-grained AuthZ (OPA / SpiceDB)
-- Multi-tenant orgs
+- Multi-tenant orgs / billing
 
 ## Adding a document type
 

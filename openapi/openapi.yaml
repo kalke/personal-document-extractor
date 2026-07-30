@@ -45,6 +45,90 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponse"
+  /v1/me:
+    get:
+      summary: Current user (upserted from Auth0 JWT, or owner of API key)
+      operationId: getMe
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/api-keys:
+    get:
+      summary: List API keys for the current user
+      operationId: listAPIKeys
+      responses:
+        "200":
+          description: Key metadata (no secrets)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/APIKey"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      summary: Create an API key for the current user
+      operationId: createAPIKey
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                  description: Defaults to extract:write; admin only if caller is admin
+      responses:
+        "201":
+          description: Created; secret shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyCreated"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /v1/api-keys/{id}:
+    delete:
+      summary: Revoke an owned API key
+      operationId: revokeAPIKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /v1/extract:
     post:
       summary: Extract structured fields from an uploaded document
@@ -166,6 +250,64 @@ components:
       properties:
         error:
           type: string
+    MeResponse:
+      type: object
+      required: [id, auth_subject, email_verified, status, auth_kind, scopes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        auth_subject:
+          type: string
+        email:
+          type: string
+        email_verified:
+          type: boolean
+        display_name:
+          type: string
+        status:
+          type: string
+        auth_kind:
+          type: string
+          enum: [api_key, jwt]
+        scopes:
+          type: array
+          items:
+            type: string
+    APIKey:
+      type: object
+      required: [id, name, key_prefix, scopes, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        key_prefix:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    APIKeyCreated:
+      allOf:
+        - $ref: "#/components/schemas/APIKey"
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: Plaintext API key; shown only once
   responses:
     Error:
       description: Error
