@@ -19,6 +19,9 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "")
 	t.Setenv("GROQ_MODEL", "")
 	t.Setenv("TRUSTED_PROXIES", "")
+	t.Setenv("AUTH0_DOMAIN", "")
+	t.Setenv("AUTH0_AUDIENCE", "")
+	t.Setenv("RATE_LIMIT_PER_MINUTE", "")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -32,6 +35,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.RedisCacheTTL != 24*time.Hour {
 		t.Fatalf("RedisCacheTTL: got %v", cfg.RedisCacheTTL)
+	}
+	if cfg.RateLimitPerMinute != 60 {
+		t.Fatalf("RateLimitPerMinute: got %d", cfg.RateLimitPerMinute)
 	}
 	if cfg.LogLevel != "info" || cfg.LogFormat != "text" {
 		t.Fatalf("log defaults: %q %q", cfg.LogLevel, cfg.LogFormat)
@@ -94,6 +100,10 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		t.Setenv("REDIS_CACHE_TTL", "24h")
 		t.Setenv("LOG_LEVEL", "info")
 		t.Setenv("LOG_FORMAT", "text")
+		t.Setenv("AUTH0_DOMAIN", "")
+		t.Setenv("AUTH0_AUDIENCE", "")
+		t.Setenv("RATE_LIMIT_PER_MINUTE", "60")
+		t.Setenv("TRUSTED_PROXIES", "")
 	}
 
 	cases := []struct {
@@ -111,6 +121,8 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"log_format", func() { base(); t.Setenv("LOG_FORMAT", "yaml") }},
 		{"blank_key", func() { base(); t.Setenv("GROQ_API_KEY", "   ") }},
 		{"trusted_proxies", func() { base(); t.Setenv("TRUSTED_PROXIES", "10/bad") }},
+		{"auth0_pair", func() { base(); t.Setenv("AUTH0_DOMAIN", "x.auth0.com"); t.Setenv("AUTH0_AUDIENCE", "") }},
+		{"rate_limit", func() { base(); t.Setenv("RATE_LIMIT_PER_MINUTE", "0") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -30,6 +30,8 @@ type ExtractionRecord struct {
 	RequestID     string
 	ClientIP      string
 	UserAgent     string
+	APIKeyID      string
+	AuthSubject   string
 	Status        string
 	Result        extract.Result
 	Duration      time.Duration
@@ -70,11 +72,21 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 		}
 	}
 
+	var apiKeyID any
+	if rec.APIKeyID != "" {
+		apiKeyID = rec.APIKeyID
+	}
+	var authSubject any
+	if rec.AuthSubject != "" {
+		authSubject = rec.AuthSubject
+	}
+
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO extractions (
 			doc_type, content_sha256, filename, mime, mode, model,
-			request_id, client_ip, user_agent, status, result_json, duration_ms
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			request_id, client_ip, user_agent, api_key_id, auth_subject,
+			status, result_json, duration_ms
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 	`,
 		rec.DocType,
 		rec.ContentSHA256,
@@ -85,6 +97,8 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 		rec.RequestID,
 		rec.ClientIP,
 		rec.UserAgent,
+		apiKeyID,
+		authSubject,
 		rec.Status,
 		payload,
 		int(rec.Duration.Milliseconds()),

@@ -13,6 +13,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/kalke/personal-document-extractor/internal/auth"
 	"github.com/kalke/personal-document-extractor/internal/cache"
 	"github.com/kalke/personal-document-extractor/internal/config"
 	"github.com/kalke/personal-document-extractor/internal/db"
@@ -23,6 +24,7 @@ import (
 	"github.com/kalke/personal-document-extractor/internal/httpapi"
 	"github.com/kalke/personal-document-extractor/internal/llm/groq"
 	"github.com/kalke/personal-document-extractor/internal/migrate"
+	"github.com/kalke/personal-document-extractor/internal/ratelimit"
 	"github.com/kalke/personal-document-extractor/internal/store"
 )
 
@@ -66,12 +68,26 @@ func main() {
 		invoice_nf.DocType{},
 	)
 
+	authenticator, err := auth.NewAuthenticator(auth.Options{
+		Keys:     store.NewAPIKeys(pool),
+		Domain:   cfg.Auth0Domain,
+		Audience: cfg.Auth0Audience,
+	})
+	if err != nil {
+		slog.Error("auth", "err", err)
+		os.Exit(1)
+	}
+	limiter := ratelimit.New(redisCache.Redis(), cfg.RateLimitPerMinute)
+
 	handler, err := httpapi.New(httpapi.Deps{
 		Extractor:      svc,
 		Pool:           pool,
 		Cache:          redisCache,
 		Extractions:    store.NewExtractions(pool),
 		TrustedProxies: cfg.TrustedProxies,
+		Auth:           authenticator,
+		RateLimit:      limiter,
+		RequiredScope:  auth.ScopeExtractWrite,
 	})
 	if err != nil {
 		slog.Error("httpapi", "err", err)

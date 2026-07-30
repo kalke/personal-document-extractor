@@ -17,12 +17,50 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
+	"github.com/kalke/personal-document-extractor/internal/auth"
 	"github.com/kalke/personal-document-extractor/internal/cache"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/httpapi"
 	"github.com/kalke/personal-document-extractor/internal/preprocess"
+	"github.com/kalke/personal-document-extractor/internal/ratelimit"
 	"github.com/kalke/personal-document-extractor/internal/store"
 )
+
+const testBearer = "test-token"
+
+type stubAuth struct {
+	principals map[string]auth.Principal
+	err        error
+}
+
+func (s *stubAuth) Authenticate(_ context.Context, token string) (auth.Principal, error) {
+	if s.err != nil {
+		return auth.Principal{}, s.err
+	}
+	if p, ok := s.principals[token]; ok {
+		return p, nil
+	}
+	return auth.Principal{}, auth.ErrUnauthorized
+}
+
+type allowAllLimiter struct{}
+
+func (allowAllLimiter) Allow(context.Context, string, string) (ratelimit.Result, error) {
+	return ratelimit.Result{Allowed: true, Limit: 1000, Remaining: 999}, nil
+}
+
+func defaultTestAuth() *stubAuth {
+	return &stubAuth{
+		principals: map[string]auth.Principal{
+			testBearer: {
+				Subject:  "api_key:test",
+				Kind:     auth.KindAPIKey,
+				APIKeyID: "00000000-0000-0000-0000-000000000001",
+				Scopes:   []string{auth.ScopeExtractWrite},
+			},
+		},
+	}
+}
 
 type stubExtractor struct {
 	mu     sync.Mutex
@@ -93,6 +131,12 @@ func (m *memoryStore) replaceCount() int {
 
 func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	t.Helper()
+	if deps.Auth == nil {
+		deps.Auth = defaultTestAuth()
+	}
+	if deps.RateLimit == nil {
+		deps.RateLimit = allowAllLimiter{}
+	}
 	h, err := httpapi.New(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -100,9 +144,90 @@ func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	return h
 }
 
-func TestNewRequiresExtractor(t *testing.T) {
+func TestNewRequiresDeps(t *testing.T) {
 	if _, err := httpapi.New(httpapi.Deps{}); err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error for missing extractor")
+	}
+	if _, err := httpapi.New(httpapi.Deps{Extractor: &stubExtractor{}}); err == nil {
+		t.Fatal("expected error for missing auth")
+	}
+	if _, err := httpapi.New(httpapi.Deps{Extractor: &stubExtractor{}, Auth: defaultTestAuth()}); err == nil {
+		t.Fatal("expected error for missing rate limiter")
+	}
+}
+
+func TestExtractUnauthorized(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{Extractor: &stubExtractor{}})
+	rec := httptest.NewRecorder()
+	req := multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t))
+	req.Header.Del("Authorization")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestExtractForbiddenScope(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{},
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {Subject: "x", Kind: auth.KindAPIKey, Scopes: []string{auth.ScopeKeysManage}},
+		}},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+type countingLimiter struct {
+	limit int
+	n     int
+}
+
+func (c *countingLimiter) Allow(context.Context, string, string) (ratelimit.Result, error) {
+	c.n++
+	remaining := c.limit - c.n
+	if remaining < 0 {
+		remaining = 0
+	}
+	return ratelimit.Result{
+		Allowed:    c.n <= c.limit,
+		Limit:      c.limit,
+		Remaining:  remaining,
+		RetryAfter: time.Second,
+	}, nil
+}
+
+func TestExtractRateLimited(t *testing.T) {
+	lim := &countingLimiter{limit: 1}
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{
+			result: extract.Result{
+				DocType: "identity_document",
+				Data:    map[string]any{"nome": "X"},
+				Meta:    extract.Meta{Mode: "vision"},
+			},
+		},
+		RateLimit: lim,
+	})
+	png := tinyPNG(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first status %d", rec.Code)
+	}
+	if rec.Header().Get("X-RateLimit-Limit") == "" {
+		t.Fatal("missing rate limit header")
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status %d body %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After")
 	}
 }
 
@@ -153,6 +278,7 @@ func TestExtractValidation(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/extract?doc_type=identity_document", nil)
+		req.Header.Set("Authorization", "Bearer "+testBearer)
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status %d", rec.Code)
@@ -202,6 +328,9 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	}
 	if st.rows[0].ClientIP == "" {
 		t.Fatal("expected client_ip persisted")
+	}
+	if st.rows[0].AuthSubject == "" || st.rows[0].APIKeyID == "" {
+		t.Fatalf("expected principal persisted: %+v", st.rows[0])
 	}
 
 	rec = httptest.NewRecorder()
@@ -369,6 +498,7 @@ func multipartRequest(t *testing.T, url, filename string, data []byte) *http.Req
 	req.RemoteAddr = "203.0.113.10:54321"
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Header.Set("User-Agent", "extract-test/1.0")
+	req.Header.Set("Authorization", "Bearer "+testBearer)
 	return req
 }
 

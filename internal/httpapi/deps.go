@@ -4,8 +4,10 @@ import (
 	"context"
 	"net"
 
+	"github.com/kalke/personal-document-extractor/internal/auth"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/preprocess"
+	"github.com/kalke/personal-document-extractor/internal/ratelimit"
 	"github.com/kalke/personal-document-extractor/internal/store"
 )
 
@@ -30,10 +32,21 @@ type DBPinger interface {
 	Ping(ctx context.Context) error
 }
 
+type Authenticator interface {
+	Authenticate(ctx context.Context, bearerToken string) (auth.Principal, error)
+}
+
+type RateLimiter interface {
+	Allow(ctx context.Context, kind, principalID string) (ratelimit.Result, error)
+}
+
 type Deps struct {
 	Extractor      Extractor
 	Pool           DBPinger
 	Cache          ResultCache
 	Extractions    ExtractionStore
 	TrustedProxies []*net.IPNet
+	Auth           Authenticator
+	RateLimit      RateLimiter
+	RequiredScope  string
 }

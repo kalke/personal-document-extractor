@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/kalke/personal-document-extractor/internal/auth"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/preprocess"
 	"github.com/kalke/personal-document-extractor/internal/store"
@@ -34,11 +35,23 @@ type Server struct {
 	cache          ResultCache
 	extractions    ExtractionStore
 	trustedProxies []*net.IPNet
+	auth           Authenticator
+	limiter        RateLimiter
 }
 
 func New(deps Deps) (http.Handler, error) {
 	if deps.Extractor == nil {
 		return nil, fmt.Errorf("extractor is required")
+	}
+	if deps.Auth == nil {
+		return nil, fmt.Errorf("authenticator is required")
+	}
+	if deps.RateLimit == nil {
+		return nil, fmt.Errorf("rate limiter is required")
+	}
+	scope := deps.RequiredScope
+	if scope == "" {
+		scope = auth.ScopeExtractWrite
 	}
 	s := &Server{
 		extractor:      deps.Extractor,
@@ -46,6 +59,8 @@ func New(deps Deps) (http.Handler, error) {
 		cache:          deps.Cache,
 		extractions:    deps.Extractions,
 		trustedProxies: deps.TrustedProxies,
+		auth:           deps.Auth,
+		limiter:        deps.RateLimit,
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -54,7 +69,12 @@ func New(deps Deps) (http.Handler, error) {
 
 	r.Get("/health", s.health)
 	r.Get("/ready", s.ready)
-	r.Post("/v1/extract", s.extract)
+	r.Route("/v1", func(r chi.Router) {
+		r.Use(s.authenticate)
+		r.Use(s.requireScope(scope))
+		r.Use(s.rateLimit)
+		r.Post("/extract", s.extract)
+	})
 	return r, nil
 }
 
@@ -167,35 +187,44 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	result.Meta.ContentSHA256 = shaHex
 	result.Meta.Cache = "miss"
+	var apiKeyID, authSubject string
+	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
+		apiKeyID = p.APIKeyID
+		authSubject = p.Subject
+	}
 	s.persist(persistArgs{
-		reqID:     reqID,
-		docType:   docType,
-		shaHex:    shaHex,
-		filename:  filename,
-		doc:       doc,
-		result:    result,
-		duration:  time.Since(start),
-		refresh:   refresh,
-		clientIP:  clientIP,
-		userAgent: userAgent,
-		log:       log,
+		reqID:       reqID,
+		docType:     docType,
+		shaHex:      shaHex,
+		filename:    filename,
+		doc:         doc,
+		result:      result,
+		duration:    time.Since(start),
+		refresh:     refresh,
+		clientIP:    clientIP,
+		userAgent:   userAgent,
+		apiKeyID:    apiKeyID,
+		authSubject: authSubject,
+		log:         log,
 	})
 	log.Info("extract", "cache", "miss", "mode", result.Meta.Mode, "images", result.Meta.Images)
 	writeJSON(w, http.StatusOK, toExtractResponse(result))
 }
 
 type persistArgs struct {
-	reqID     string
-	docType   string
-	shaHex    string
-	filename  string
-	doc       preprocess.PreparedDocument
-	result    extract.Result
-	duration  time.Duration
-	refresh   bool
-	clientIP  string
-	userAgent string
-	log       *slog.Logger
+	reqID       string
+	docType     string
+	shaHex      string
+	filename    string
+	doc         preprocess.PreparedDocument
+	result      extract.Result
+	duration    time.Duration
+	refresh     bool
+	clientIP    string
+	userAgent   string
+	apiKeyID    string
+	authSubject string
+	log         *slog.Logger
 }
 
 func (s *Server) lookupCache(ctx context.Context, docType, shaHex string) (extract.Result, bool) {
@@ -235,6 +264,8 @@ func (s *Server) persist(args persistArgs) {
 		RequestID:     args.reqID,
 		ClientIP:      args.clientIP,
 		UserAgent:     args.userAgent,
+		APIKeyID:      args.apiKeyID,
+		AuthSubject:   args.authSubject,
 		Status:        "success",
 		Result:        args.result,
 		Duration:      args.duration,

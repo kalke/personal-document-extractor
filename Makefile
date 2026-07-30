@@ -123,6 +123,8 @@ tidy: ## Sync go.mod / go.sum
 .PHONY: ci
 ci: lint test ## Lint + tests + binary build (GitHub Actions also runs docker build)
 	go build -o /tmp/personal-document-extractor-api ./cmd/api
+	go build -o /tmp/personal-document-extractor-migrate ./cmd/migrate
+	go build -o /tmp/personal-document-extractor-apikey ./cmd/apikey
 
 .PHONY: run
 run: check-env ## Run API on the host (needs local Go, Postgres, Redis, poppler)
@@ -131,6 +133,13 @@ run: check-env ## Run API on the host (needs local Go, Postgres, Redis, poppler)
 .PHONY: migrate-local
 migrate-local: ## Apply migrations with local Go (uses DATABASE_URL from .env)
 	go run ./cmd/migrate
+
+.PHONY: apikey
+apikey: ## Create an API key: make apikey NAME=local SCOPES=extract:write
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
+	go run ./cmd/apikey -name "$(or $(NAME),local)" -scopes "$(or $(SCOPES),extract:write)"
 
 .PHONY: health
 health: ## Curl /health

@@ -40,6 +40,14 @@ func (c *Cache) Close() error {
 	return c.rdb.Close()
 }
 
+// Redis exposes the underlying client for shared infrastructure (e.g. rate limiting).
+func (c *Cache) Redis() *redis.Client {
+	if c == nil {
+		return nil
+	}
+	return c.rdb
+}
+
 func Key(docType, sha256hex string) string {
 	return fmt.Sprintf("extract:v1:%s:%s", docType, sha256hex)
 }

@@ -10,18 +10,21 @@ import (
 )
 
 type Config struct {
-	Port           string
-	GroqAPIKey     string
-	GroqModel      string
-	GroqBaseURL    string
-	LogLevel       string
-	LogFormat      string
-	DatabaseURL    string
-	RedisAddr      string
-	RedisPassword  string
-	RedisDB        int
-	RedisCacheTTL  time.Duration
-	TrustedProxies []*net.IPNet
+	Port               string
+	GroqAPIKey         string
+	GroqModel          string
+	GroqBaseURL        string
+	LogLevel           string
+	LogFormat          string
+	DatabaseURL        string
+	RedisAddr          string
+	RedisPassword      string
+	RedisDB            int
+	RedisCacheTTL      time.Duration
+	TrustedProxies     []*net.IPNet
+	Auth0Domain        string
+	Auth0Audience      string
+	RateLimitPerMinute int
 }
 
 func Load() (Config, error) {
@@ -41,24 +44,41 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid REDIS_DB: must be >= 0")
 	}
 
+	rateLimit, err := strconv.Atoi(getenv("RATE_LIMIT_PER_MINUTE", "60"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid RATE_LIMIT_PER_MINUTE: %w", err)
+	}
+	if rateLimit <= 0 {
+		return Config{}, fmt.Errorf("invalid RATE_LIMIT_PER_MINUTE: must be > 0")
+	}
+
 	trusted, err := parseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
 	if err != nil {
 		return Config{}, err
 	}
 
+	auth0Domain := strings.TrimSpace(os.Getenv("AUTH0_DOMAIN"))
+	auth0Audience := strings.TrimSpace(os.Getenv("AUTH0_AUDIENCE"))
+	if (auth0Domain == "") != (auth0Audience == "") {
+		return Config{}, fmt.Errorf("AUTH0_DOMAIN and AUTH0_AUDIENCE must both be set or both empty")
+	}
+
 	cfg := Config{
-		Port:           getenv("PORT", "8080"),
-		GroqAPIKey:     strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
-		GroqModel:      getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
-		GroqBaseURL:    getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-		LogLevel:       strings.ToLower(getenv("LOG_LEVEL", "info")),
-		LogFormat:      strings.ToLower(getenv("LOG_FORMAT", "text")),
-		DatabaseURL:    strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		RedisAddr:      getenv("REDIS_ADDR", "localhost:6379"),
-		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
-		RedisDB:        redisDB,
-		RedisCacheTTL:  ttl,
-		TrustedProxies: trusted,
+		Port:               getenv("PORT", "8080"),
+		GroqAPIKey:         strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
+		GroqModel:          getenv("GROQ_MODEL", "qwen/qwen3.6-27b"),
+		GroqBaseURL:        getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+		LogLevel:           strings.ToLower(getenv("LOG_LEVEL", "info")),
+		LogFormat:          strings.ToLower(getenv("LOG_FORMAT", "text")),
+		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
+		RedisDB:            redisDB,
+		RedisCacheTTL:      ttl,
+		TrustedProxies:     trusted,
+		Auth0Domain:        auth0Domain,
+		Auth0Audience:      auth0Audience,
+		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {
 		return Config{}, fmt.Errorf("GROQ_API_KEY is required")
