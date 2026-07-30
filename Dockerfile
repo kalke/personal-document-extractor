@@ -9,7 +9,9 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-	go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+	go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api \
+	&& CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+	go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 FROM alpine:3.20
 
@@ -18,6 +20,8 @@ RUN apk add --no-cache ca-certificates poppler-utils \
 
 WORKDIR /app
 COPY --from=build /out/api /app/api
+COPY --from=build /out/migrate /app/migrate
+COPY migrations/ /app/migrations/
 
 USER appuser
 
@@ -27,7 +31,7 @@ ENV PORT=8080 \
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
 	CMD wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1
 
 ENTRYPOINT ["/app/api"]
