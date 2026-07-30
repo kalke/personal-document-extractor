@@ -1,0 +1,175 @@
+openapi: 3.1.0
+info:
+  title: Personal Document Extractor API
+  version: 1.0.0
+  description: |
+    Extract structured JSON from Brazilian identity documents, address proofs,
+    and invoices. Authenticate with `Authorization: Bearer` using either an
+    API key (`pde_live_…`) or an Auth0 OIDC access token.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: http://localhost:8080
+    description: Local / Compose
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      security: []
+      operationId: getHealth
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /ready:
+    get:
+      summary: Readiness probe (Postgres required; Redis reported)
+      security: []
+      operationId: getReady
+      responses:
+        "200":
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "503":
+          description: Postgres unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+  /v1/extract:
+    post:
+      summary: Extract structured fields from an uploaded document
+      operationId: extractDocument
+      parameters:
+        - name: doc_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - identity_document
+              - address_proof
+              - invoice_nf
+        - name: refresh
+          in: query
+          required: false
+          description: Bypass Redis cache and soft-delete prior Postgres row for the same content hash
+          schema:
+            type: string
+            enum: ["true", "1", "yes", "y", "on"]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Extraction succeeded
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "429":
+          description: Rate limit exceeded or rate-limit store unavailable
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key (`pde_live_…`) or Auth0 JWT access token
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, doc_types]
+      properties:
+        status:
+          type: string
+          example: ok
+        doc_types:
+          type: array
+          items:
+            type: string
+    ReadyResponse:
+      type: object
+      required: [status, db, redis]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        db:
+          type: boolean
+        redis:
+          type: boolean
+    ExtractResponse:
+      type: object
+      required: [doc_type, data]
+      properties:
+        doc_type:
+          type: string
+        data:
+          description: Document-type-specific fields
+          type: object
+          additionalProperties: true
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
