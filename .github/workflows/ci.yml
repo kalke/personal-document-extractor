@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  quality:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +22,22 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12
+          args: ./...
 
       - name: Test
-        run: go test ./...
+        run: make test
 
       - name: Build
-        run: go build -o /tmp/api ./cmd/api
+        run: |
+          go build -o /tmp/api ./cmd/api
+          go build -o /tmp/migrate ./cmd/migrate
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Docker build
         run: docker build -t personal-document-extractor:ci .
