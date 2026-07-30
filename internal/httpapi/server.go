@@ -131,8 +131,9 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	doc, err := preprocess.Prepare(filename, data)
 	if err != nil {
-		log.Warn("preprocess failed", "err", err, "doc_type", docType)
-		writeErr(w, http.StatusBadRequest, err.Error())
+		status, msg := mapPreprocessError(err)
+		log.Warn("preprocess failed", "err", err, "doc_type", docType, "status", status)
+		writeErr(w, status, msg)
 		return
 	}
 
@@ -300,6 +301,21 @@ func writeUploadError(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, preprocess.ErrEmptyUpload.Error())
 	default:
 		writeErr(w, http.StatusBadRequest, "invalid multipart form")
+	}
+}
+
+func mapPreprocessError(err error) (int, string) {
+	switch {
+	case errors.Is(err, preprocess.ErrEmptyUpload):
+		return http.StatusBadRequest, preprocess.ErrEmptyUpload.Error()
+	case errors.Is(err, preprocess.ErrUnsupportedMedia):
+		return http.StatusBadRequest, preprocess.ErrUnsupportedMedia.Error()
+	case errors.Is(err, preprocess.ErrMIMEMismatch):
+		return http.StatusBadRequest, preprocess.ErrMIMEMismatch.Error()
+	case errors.Is(err, preprocess.ErrUploadTooLarge):
+		return http.StatusRequestEntityTooLarge, preprocess.ErrUploadTooLarge.Error()
+	default:
+		return http.StatusBadRequest, "invalid document"
 	}
 }
 
