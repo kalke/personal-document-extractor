@@ -49,9 +49,4 @@ func TestUsersUpsertIdempotentIntegration(t *testing.T) {
 	if u2.Email != "b@example.com" || u2.DisplayName != "B" {
 		t.Fatalf("%+v", u2)
 	}
-
-	ops, err := users.EnsureSystemOps(ctx)
-	if err != nil || ops.AuthSubject != store.SystemOpsSubject {
-		t.Fatalf("ops=%+v err=%v", ops, err)
-	}
 }

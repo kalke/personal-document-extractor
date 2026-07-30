@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kalke/personal-document-extractor/internal/auth"
 	"github.com/kalke/personal-document-extractor/internal/db"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/store"
@@ -27,26 +26,13 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 
-	plain, prefix, hash, err := auth.GenerateAPIKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = plain
-
-	ops, err := store.NewUsers(pool).EnsureSystemOps(ctx)
-	if err != nil {
-		t.Fatalf("system user: %v", err)
-	}
-
-	keyRec, err := store.NewAPIKeys(pool).Create(ctx, store.CreateAPIKeyInput{
-		UserID:    ops.ID,
-		Name:      "integration",
-		KeyPrefix: prefix,
-		KeyHash:   hash,
-		Scopes:    []string{auth.ScopeExtractWrite},
+	user, err := store.NewUsers(pool).UpsertBySubject(ctx, store.UpsertUserInput{
+		AuthSubject: "oidc|extraction-integration",
+		Email:       "extract@example.com",
+		DisplayName: "Extract Test",
 	})
 	if err != nil {
-		t.Fatalf("create key: %v", err)
+		t.Fatalf("user: %v", err)
 	}
 
 	ex := store.NewExtractions(pool)
@@ -61,9 +47,8 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		RequestID:     "req-1",
 		ClientIP:      "203.0.113.9",
 		UserAgent:     "integration-test",
-		APIKeyID:      keyRec.ID,
-		AuthSubject:   "api_key:" + keyRec.ID,
-		UserID:        ops.ID,
+		AuthSubject:   user.AuthSubject,
+		UserID:        user.ID,
 		Status:        "success",
 		Result: extract.Result{
 			DocType: "identity_document",
