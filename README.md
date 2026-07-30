@@ -51,6 +51,8 @@ make destroy               # stop and delete volumes
 | `make apikey NAME=…` | Create a hashed API key (`SCOPES=` optional) |
 | `make admin` | Create an admin API key (`NAME=` optional, default `admin`) |
 | `make health` / `make ready` | Hit `/health` and `/ready` |
+| `make me` | `GET /v1/me` (`API_KEY=` required) |
+| `make extract FILE=…` | `POST /v1/extract` (`API_KEY=`, `DOC_TYPE=` optional) |
 | `make lint` | golangci-lint (same as CI) |
 | `make test` | Unit + integration tests (no Docker) |
 | `make test-race` / `make test-cover` | Race detector / coverage |
@@ -185,16 +187,18 @@ Example response (only `doc_type` + `data` — no `meta`):
 
 | Status | When | Typical `error` |
 |---|---|---|
-| `400` | Missing `doc_type` / file, bad media, MIME mismatch | validation message / `unknown doc_type` |
-| `401` | Missing/invalid Bearer token | `unauthorized` / `missing or invalid authorization` |
+| `400` | Missing `doc_type` / file, bad media, MIME mismatch, preprocess | see [OpenAPI error catalog](openapi/openapi.yaml) |
+| `401` | Missing/invalid Bearer or inactive user | `unauthorized` / `missing or invalid authorization` |
 | `403` | Authenticated but missing scope | `forbidden` |
 | `413` | Upload too large | `uploaded file exceeds size limit` |
 | `422` | Model JSON could not be parsed | `could not process document` |
 | `429` | Rate limit exceeded or Redis limiter down | `rate limit exceeded` / `rate limit unavailable` |
+| `500` | Unexpected extract failure | `could not process document` |
 | `502` | Groq request failed | `extraction provider unavailable` |
-| `503` | `/ready` when Postgres is down | — |
 
-Body shape: `{"error":"…"}`. Provider internals are logged server-side, not returned.
+`GET /ready` returns **503** with `{status,db,redis}` when Postgres is down (not an `error` envelope).
+
+Body shape for failures: `{"error":"…"}`. Full status/message catalog: [`openapi/openapi.yaml`](openapi/openapi.yaml) (`components.schemas.ErrorCatalog` + per-response examples).
 
 ### Output conventions
 
@@ -267,7 +271,7 @@ make ci            # lint + test + binary build
 ```
 
 - **Unit tests** cover config, normalize, doctype `Normalize`, extract JSON decoding, cache keys, and fail-open nil paths.
-- **Integration tests** exercise `/health`, `/ready`, and `/v1/extract` with fakes + [miniredis](https://github.com/alicebob/miniredis) (validate-before-cache, hit/miss, stable errors, persistence). No live Groq/Postgres required.
+- **Integration tests** exercise `/health`, `/ready`, `/v1/extract`, `/v1/me`, and `/v1/api-keys` with fakes + [miniredis](https://github.com/alicebob/miniredis). Store tests run against real Postgres when `DATABASE_URL` is set (CI).
 
 GitHub Actions runs **lint**, **goose migrate** against a Postgres 18 service, **`make test`** (including store integration tests when `DATABASE_URL` is set), binary builds, then **`docker build`**. Locally, `make ci` covers lint + test + build without Docker; set `DATABASE_URL` to exercise Postgres integration tests.
 

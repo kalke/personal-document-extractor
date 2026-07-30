@@ -156,6 +156,23 @@ health: ## Curl /health
 ready: ## Curl /ready
 	@curl -sS "http://localhost:$(APP_PORT)/ready"; echo
 
+.PHONY: me
+me: ## GET /v1/me (requires API_KEY=pde_live_…)
+	@if [ -z "$(API_KEY)" ]; then echo "Usage: make me API_KEY=pde_live_…"; exit 1; fi
+	@curl -sS "http://localhost:$(APP_PORT)/v1/me" \
+		-H "Authorization: Bearer $(API_KEY)"; echo
+
+.PHONY: extract
+extract: ## POST /v1/extract (API_KEY= FILE=path [DOC_TYPE=identity_document])
+	@if [ -z "$(API_KEY)" ] || [ -z "$(FILE)" ]; then \
+		echo "Usage: make extract API_KEY=pde_live_… FILE=./doc.pdf [DOC_TYPE=identity_document]"; \
+		exit 1; \
+	fi
+	@curl -sS -X POST \
+		"http://localhost:$(APP_PORT)/v1/extract?doc_type=$(or $(DOC_TYPE),identity_document)" \
+		-H "Authorization: Bearer $(API_KEY)" \
+		-F "file=@$(FILE)"; echo
+
 .PHONY: clean
 clean: ## Remove local build artifacts
 	rm -rf bin/ dist/ tmp/ .tmp/ coverage.out

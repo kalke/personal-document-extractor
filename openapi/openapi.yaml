@@ -1,22 +1,38 @@
 openapi: 3.1.0
 info:
   title: Personal Document Extractor API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Extract structured JSON from Brazilian identity documents, address proofs,
-    and invoices. Authenticate with `Authorization: Bearer` using either an
-    API key (`pde_live_…`) or an Auth0 OIDC access token.
+    and invoices.
+
+    **AuthN:** `Authorization: Bearer` with an API key (`pde_live_…`) or an Auth0
+    access token (RS256). Human login (password/social/MFA) lives in Auth0; this
+    API stores a local `users` projection and owns API keys.
+
+    **AuthZ scopes:** `extract:write`, `keys:manage`, `admin` (implies all).
+    JWT tokens without Auth0 RBAC permissions receive default
+    `extract:write` + `keys:manage`.
+
+    **Errors:** unless noted, error bodies are `{"error":"<message>"}`.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
 servers:
   - url: http://localhost:8080
     description: Local / Compose
+tags:
+  - name: health
+  - name: users
+  - name: api-keys
+  - name: extract
 security:
   - bearerAuth: []
+
 paths:
   /health:
     get:
+      tags: [health]
       summary: Liveness probe
       security: []
       operationId: getHealth
@@ -27,8 +43,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+
   /ready:
     get:
+      tags: [health]
       summary: Readiness probe (Postgres required; Redis reported)
       security: []
       operationId: getReady
@@ -39,110 +57,192 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponse"
+              examples:
+                ready:
+                  value: { status: ready, db: true, redis: true }
         "503":
-          description: Postgres unavailable
+          description: Postgres unavailable (`status=not_ready`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyResponse"
+              examples:
+                not_ready:
+                  value: { status: not_ready, db: false, redis: true }
+
   /v1/me:
     get:
-      summary: Current user (upserted from Auth0 JWT, or owner of API key)
+      tags: [users]
+      summary: Current user profile
+      description: |
+        Any authenticated principal (JWT or API key) with a linked `user_id`.
+        No scope required. Disabled users receive 401.
       operationId: getMe
       responses:
         "200":
-          description: User profile
+          description: Active user profile
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MeResponse"
         "401":
-          $ref: "#/components/responses/Error"
-  /v1/api-keys:
-    get:
-      summary: List API keys for the current user
-      operationId: listAPIKeys
-      responses:
-        "200":
-          description: Key metadata (no secrets)
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          description: Misconfiguration
           content:
             application/json:
               schema:
-                type: object
-                required: [keys]
-                properties:
-                  keys:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/APIKey"
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                users_not_configured:
+                  value: { error: users not configured }
+
+  /v1/api-keys:
+    get:
+      tags: [api-keys]
+      summary: List API keys for the current user
+      description: Requires `keys:manage` or `admin`. Includes revoked keys (`revoked_at` set).
+      operationId: listAPIKeys
+      responses:
+        "200":
+          description: Key metadata (never includes secrets)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyListResponse"
         "401":
-          $ref: "#/components/responses/Error"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Error"
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Store failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                list_failed:
+                  value: { error: could not list api keys }
     post:
+      tags: [api-keys]
       summary: Create an API key for the current user
+      description: |
+        Requires `keys:manage` or `admin`.
+        Defaults: `name=default`, `scopes=["extract:write"]`.
+        Empty body is treated as `{}`. Callers without `admin` cannot request `admin` scope.
+        Secret is returned **once**.
       operationId: createAPIKey
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                scopes:
-                  type: array
-                  items:
-                    type: string
-                  description: Defaults to extract:write; admin only if caller is admin
+              $ref: "#/components/schemas/CreateAPIKeyRequest"
+            examples:
+              default:
+                value: {}
+              named:
+                value: { name: web, scopes: [extract:write] }
       responses:
         "201":
-          description: Created; secret shown once
+          description: Created; `secret` shown once
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/APIKeyCreated"
         "400":
-          $ref: "#/components/responses/Error"
+          description: Invalid body or unknown scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                invalid_json:
+                  value: { error: invalid json body }
+                unknown_scope:
+                  value: { error: unknown scope }
         "401":
-          $ref: "#/components/responses/Error"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Error"
+          description: Missing scope or cannot mint admin keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                forbidden:
+                  value: { error: forbidden }
+                cannot_admin:
+                  value: { error: cannot create admin keys }
+        "500":
+          description: Generation or store failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                create_failed:
+                  value: { error: could not create api key }
+
   /v1/api-keys/{id}:
     delete:
+      tags: [api-keys]
       summary: Revoke an owned API key
+      description: Requires `keys:manage` or `admin`. Soft-revoke (`revoked_at`).
       operationId: revokeAPIKey
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - $ref: "#/components/parameters/APIKeyID"
       responses:
         "204":
-          description: Revoked
+          description: Revoked (empty body)
+        "400":
+          description: Missing path id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                missing_id:
+                  value: { error: missing key id }
         "401":
-          $ref: "#/components/responses/Error"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Error"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/Error"
+          description: Key not found for this user (or already revoked)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                not_found:
+                  value: { error: api key not found }
+        "500":
+          description: Store failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                revoke_failed:
+                  value: { error: could not revoke api key }
+
   /v1/extract:
     post:
+      tags: [extract]
       summary: Extract structured fields from an uploaded document
+      description: |
+        Requires `extract:write` or `admin`. Rate-limited per principal (Redis;
+        fail-closed → 429 if Redis unavailable). Successful responses include
+        `X-RateLimit-*` headers. Persist/cache failures after a successful
+        extraction still return 200.
       operationId: extractDocument
       parameters:
         - name: doc_type
           in: query
           required: true
           schema:
-            type: string
-            enum:
-              - identity_document
-              - address_proof
-              - invoice_nf
+            $ref: "#/components/schemas/DocType"
         - name: refresh
           in: query
           required: false
@@ -161,60 +261,194 @@ paths:
                 file:
                   type: string
                   format: binary
+                  description: PDF, JPEG, PNG, or WebP (max 32 MiB)
       responses:
         "200":
-          description: Extraction succeeded
+          description: Extraction succeeded (`doc_type` + `data` only; no meta)
           headers:
             X-RateLimit-Limit:
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Limit"
             X-RateLimit-Remaining:
-              schema:
-                type: integer
+              $ref: "#/components/headers/X-RateLimit-Remaining"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExtractResponse"
         "400":
-          $ref: "#/components/responses/Error"
-        "401":
-          $ref: "#/components/responses/Error"
-        "403":
-          $ref: "#/components/responses/Error"
-        "413":
-          $ref: "#/components/responses/Error"
-        "422":
-          $ref: "#/components/responses/Error"
-        "429":
-          description: Rate limit exceeded or rate-limit store unavailable
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-            X-RateLimit-Limit:
-              schema:
-                type: integer
-            X-RateLimit-Remaining:
-              schema:
-                type: integer
+          description: Validation / preprocess / unknown doc_type
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+              examples:
+                missing_doc_type:
+                  value: { error: missing doc_type query param }
+                missing_file:
+                  value: { error: "multipart field 'file' is required" }
+                empty_upload:
+                  value: { error: uploaded file is empty }
+                invalid_multipart:
+                  value: { error: invalid multipart form }
+                unsupported_media:
+                  value: { error: unsupported media type }
+                mime_mismatch:
+                  value: { error: filename extension does not match file contents }
+                invalid_document:
+                  value: { error: invalid document }
+                unknown_doc_type:
+                  value: { error: unknown doc_type }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          description: Upload too large
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                too_large:
+                  value: { error: uploaded file exceeds size limit }
+        "422":
+          description: Model returned unparseable JSON
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                bad_json:
+                  value: { error: could not process document }
+        "429":
+          description: Rate limit exceeded or rate-limit store unavailable
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/Retry-After"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                exceeded:
+                  value: { error: rate limit exceeded }
+                unavailable:
+                  value: { error: rate limit unavailable }
+        "500":
+          description: Unexpected extraction failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                unexpected:
+                  value: { error: could not process document }
         "502":
-          $ref: "#/components/responses/Error"
-        "503":
-          $ref: "#/components/responses/Error"
+          description: Upstream LLM provider failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+              examples:
+                provider:
+                  value: { error: extraction provider unavailable }
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      description: API key (`pde_live_…`) or Auth0 JWT access token
+      bearerFormat: "API key (pde_live_…) or Auth0 JWT"
+      description: |
+        Pass either a hashed API key secret or an Auth0 access token.
+        Middleware errors when missing/invalid:
+        - `missing or invalid authorization`
+        - `unauthorized`
+
+  parameters:
+    APIKeyID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    X-RateLimit-Limit:
+      description: Requests allowed per fixed 1-minute window
+      schema:
+        type: integer
+    X-RateLimit-Remaining:
+      description: Remaining requests in the current window
+      schema:
+        type: integer
+    Retry-After:
+      description: Seconds to wait before retrying (on 429 exceeded)
+      schema:
+        type: integer
+
   schemas:
+    Scope:
+      type: string
+      enum: [extract:write, keys:manage, admin]
+
+    DocType:
+      type: string
+      enum: [identity_document, address_proof, invoice_nf]
+
+    ErrorBody:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          description: Stable client-facing message (see examples on each response)
+      examples:
+        - { error: unauthorized }
+        - { error: forbidden }
+
+    ErrorCatalog:
+      description: |
+        Catalog of `error` string values returned by the API (for documentation).
+        Not used as a response schema itself.
+      type: string
+      enum:
+        - authentication not configured
+        - missing or invalid authorization
+        - unauthorized
+        - forbidden
+        - rate limit unavailable
+        - rate limit exceeded
+        - missing doc_type query param
+        - multipart field 'file' is required
+        - uploaded file is empty
+        - invalid multipart form
+        - uploaded file exceeds size limit
+        - unsupported media type
+        - filename extension does not match file contents
+        - invalid document
+        - unknown doc_type
+        - could not process document
+        - extraction provider unavailable
+        - users not configured
+        - could not list api keys
+        - invalid json body
+        - cannot create admin keys
+        - unknown scope
+        - could not create api key
+        - missing key id
+        - api key not found
+        - could not revoke api key
+
     HealthResponse:
       type: object
       required: [status, doc_types]
+      additionalProperties: false
       properties:
         status:
           type: string
@@ -223,9 +457,11 @@ components:
           type: array
           items:
             type: string
+
     ReadyResponse:
       type: object
       required: [status, db, redis]
+      additionalProperties: false
       properties:
         status:
           type: string
@@ -234,31 +470,18 @@ components:
           type: boolean
         redis:
           type: boolean
-    ExtractResponse:
-      type: object
-      required: [doc_type, data]
-      properties:
-        doc_type:
-          type: string
-        data:
-          description: Document-type-specific fields
-          type: object
-          additionalProperties: true
-    ErrorBody:
-      type: object
-      required: [error]
-      properties:
-        error:
-          type: string
+
     MeResponse:
       type: object
       required: [id, auth_subject, email_verified, status, auth_kind, scopes]
+      additionalProperties: false
       properties:
         id:
           type: string
           format: uuid
         auth_subject:
           type: string
+          description: Auth0 `sub` or `system:ops` / similar
         email:
           type: string
         email_verified:
@@ -267,50 +490,123 @@ components:
           type: string
         status:
           type: string
+          enum: [active, disabled]
         auth_kind:
           type: string
           enum: [api_key, jwt]
         scopes:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/Scope"
+
+    CreateAPIKeyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Defaults to `default` when omitted/blank
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Scope"
+          description: Defaults to `[extract:write]` when omitted/empty
+
     APIKey:
       type: object
       required: [id, name, key_prefix, scopes, created_at]
+      additionalProperties: false
       properties:
         id:
           type: string
+          format: uuid
         name:
           type: string
         key_prefix:
           type: string
+          description: Public lookup prefix (not the secret)
         scopes:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/Scope"
         expires_at:
           type: string
           format: date-time
-          nullable: true
         revoked_at:
           type: string
           format: date-time
-          nullable: true
         created_at:
           type: string
           format: date-time
+
+    APIKeyListResponse:
+      type: object
+      required: [keys]
+      additionalProperties: false
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/APIKey"
+
     APIKeyCreated:
       allOf:
         - $ref: "#/components/schemas/APIKey"
         - type: object
           required: [secret]
+          additionalProperties: false
           properties:
             secret:
               type: string
               description: Plaintext API key; shown only once
+
+    ExtractResponse:
+      type: object
+      required: [doc_type, data]
+      additionalProperties: false
+      properties:
+        doc_type:
+          $ref: "#/components/schemas/DocType"
+        data:
+          description: Document-type-specific fields (identity / address / invoice)
+          type: object
+          additionalProperties: true
+      examples:
+        - doc_type: identity_document
+          data:
+            tipo: CNH
+            nome: FULANO DA SILVA
+            cpf: "52998224725"
+            numero_documento: "12345678901"
+            data_nascimento: "1990-01-15"
+            orgao_emissor: DETRAN/SP
+            validade: "2030-12-31"
+
   responses:
+    Unauthorized:
+      description: |
+        Missing/invalid Bearer token, inactive user, or failed identity sync.
+        Typical `error` values: `missing or invalid authorization`, `unauthorized`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+          examples:
+            missing_header:
+              value: { error: missing or invalid authorization }
+            unauthorized:
+              value: { error: unauthorized }
+    Forbidden:
+      description: Authenticated but missing required scope (`error=forbidden`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+          examples:
+            forbidden:
+              value: { error: forbidden }
     Error:
-      description: Error
+      description: Generic error envelope
       content:
         application/json:
           schema:
