@@ -1,10 +1,11 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -22,8 +23,10 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		slog.Error("config", "err", err)
+		os.Exit(1)
 	}
+	setupLogger(cfg.LogLevel, cfg.LogFormat)
 
 	llm := groq.New(cfg.GroqAPIKey, cfg.GroqModel, cfg.GroqBaseURL)
 	svc := extract.NewService(
@@ -33,10 +36,41 @@ func main() {
 		invoice_nf.DocType{},
 	)
 
-	handler := httpapi.New(svc)
 	addr := ":" + cfg.Port
-	fmt.Fprintf(os.Stderr, "personal-document-extractor listening on %s (model=%s)\n", addr, cfg.GroqModel)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		log.Fatalf("server: %v", err)
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           httpapi.New(svc),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      130 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+
+	slog.Info("server starting", "addr", addr, "model", cfg.GroqModel)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("server stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+func setupLogger(level, format string) {
+	var lv slog.Level
+	switch strings.ToLower(level) {
+	case "debug":
+		lv = slog.LevelDebug
+	case "warn":
+		lv = slog.LevelWarn
+	case "error":
+		lv = slog.LevelError
+	default:
+		lv = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lv}
+	var h slog.Handler
+	if strings.EqualFold(format, "json") {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(h))
 }

@@ -1,0 +1,16 @@
+.git
+.gitignore
+.air.toml
+.tmp
+tmp/
+bin/
+dist/
+.env
+.env.*
+!.env.example
+*.md
+.vscode/
+.idea/
+.DS_Store
+coverage.out
+**/*_test.go

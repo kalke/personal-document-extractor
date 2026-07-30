@@ -8,7 +8,6 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// TextFromPDF extracts plain text from PDF bytes.
 func TextFromPDF(data []byte) (string, error) {
 	reader, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {

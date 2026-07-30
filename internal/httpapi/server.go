@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -23,12 +25,31 @@ func New(extractor *extract.Service) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(accessLog)
 
 	r.Get("/health", s.health)
 	r.Post("/v1/extract", s.extract)
 	return r
+}
+
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		if r.URL.Path == "/health" {
+			return
+		}
+		slog.Info("http",
+			"req_id", middleware.GetReqID(r.Context()),
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.Status(),
+			"bytes", ww.BytesWritten(),
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -39,13 +60,17 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	log := slog.With("req_id", middleware.GetReqID(r.Context()))
+
 	docType := strings.TrimSpace(r.URL.Query().Get("doc_type"))
 	if docType == "" {
 		writeErr(w, http.StatusBadRequest, "missing doc_type query param")
 		return
 	}
 
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(preprocess.MaxUploadBytes); err != nil {
+		log.Warn("multipart parse failed", "err", err)
 		writeErr(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
@@ -67,20 +92,26 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.ToLower(header.Filename)
-	if !strings.HasSuffix(name, ".pdf") && !strings.Contains(header.Header.Get("Content-Type"), "pdf") {
-		writeErr(w, http.StatusBadRequest, "only PDF files are supported in MVP")
-		return
-	}
+	log.Info("extract received",
+		"doc_type", docType,
+		"filename", header.Filename,
+		"bytes", len(data),
+	)
 
-	text, err := preprocess.TextFromPDF(data)
+	doc, err := preprocess.Prepare(header.Filename, header.Header.Get("Content-Type"), data)
 	if err != nil {
+		log.Warn("preprocess failed", "err", err)
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	result, err := s.extractor.Extract(r.Context(), docType, text)
+	result, err := s.extractor.Extract(r.Context(), docType, doc)
 	if err != nil {
+		log.Error("extract failed",
+			"doc_type", docType,
+			"err", err,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
 		switch {
 		case errors.Is(err, extract.ErrUnknownDocType):
 			writeErr(w, http.StatusBadRequest, err.Error())
@@ -94,6 +125,12 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Info("extract done",
+		"doc_type", result.DocType,
+		"mode", result.Meta.Mode,
+		"images", result.Meta.Images,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -108,5 +145,7 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("write json failed", "err", err)
+	}
 }

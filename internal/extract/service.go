@@ -2,12 +2,16 @@ package extract
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/kalke/personal-document-extractor/internal/llm/groq"
+	"github.com/kalke/personal-document-extractor/internal/preprocess"
 )
 
 var (
@@ -16,12 +20,12 @@ var (
 	ErrLLM            = errors.New("llm request failed")
 )
 
-// DocType describes a fixed document extraction schema.
 type DocType interface {
 	Name() string
 	SystemPrompt() string
 	SchemaHint() string
 	EmptyResult() any
+	Normalize(result any)
 }
 
 type Result struct {
@@ -31,8 +35,11 @@ type Result struct {
 }
 
 type Meta struct {
-	Model string `json:"model"`
-	Chars int    `json:"chars"`
+	Model    string `json:"model"`
+	Chars    int    `json:"chars"`
+	Mode     string `json:"mode"`
+	Images   int    `json:"images"`
+	Filename string `json:"filename,omitempty"`
 }
 
 type Service struct {
@@ -56,23 +63,39 @@ func (s *Service) KnownTypes() []string {
 	return out
 }
 
-func (s *Service) Extract(ctx context.Context, docType, documentText string) (Result, error) {
+func (s *Service) Extract(ctx context.Context, docType string, doc preprocess.PreparedDocument) (Result, error) {
 	dt, ok := s.registry[docType]
 	if !ok {
 		return Result{}, fmt.Errorf("%w: %s", ErrUnknownDocType, docType)
 	}
 
-	userPrompt := buildUserPrompt(dt, documentText)
-	content, err := s.llm.Chat(ctx, []groq.Message{
+	start := time.Now()
+	slog.Debug("extract start",
+		"doc_type", docType,
+		"filename", doc.Filename,
+		"kind", doc.Kind,
+		"mode", doc.Mode,
+		"text_chars", len(doc.Text),
+		"images", len(doc.Images),
+	)
+
+	messages := []groq.Message{
 		{Role: "system", Content: dt.SystemPrompt()},
-		{Role: "user", Content: userPrompt},
-	})
+		{Role: "user", Content: buildUserContent(dt, doc)},
+	}
+
+	content, err := s.llm.Chat(ctx, messages)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrLLM, err)
 	}
 
 	parsed, err := decodeInto(dt, content)
 	if err != nil {
+		slog.Warn("extract json parse failed; attempting repair",
+			"doc_type", docType,
+			"err", err,
+			"reply_chars", len(content),
+		)
 		repaired, repairErr := s.repairJSON(ctx, dt, content)
 		if repairErr != nil {
 			return Result{}, fmt.Errorf("%w: %v (repair failed: %v)", ErrInvalidJSON, err, repairErr)
@@ -80,12 +103,25 @@ func (s *Service) Extract(ctx context.Context, docType, documentText string) (Re
 		parsed = repaired
 	}
 
+	dt.Normalize(parsed)
+
+	slog.Info("extract ok",
+		"doc_type", docType,
+		"mode", doc.Mode,
+		"images", len(doc.Images),
+		"duration_ms", time.Since(start).Milliseconds(),
+		"model", s.llm.Model(),
+	)
+
 	return Result{
 		DocType: dt.Name(),
 		Data:    parsed,
 		Meta: Meta{
-			Model: s.llm.Model(),
-			Chars: len(documentText),
+			Model:    s.llm.Model(),
+			Chars:    len(doc.Text),
+			Mode:     doc.Mode,
+			Images:   len(doc.Images),
+			Filename: doc.Filename,
 		},
 	}, nil
 }
@@ -101,20 +137,63 @@ func (s *Service) repairJSON(ctx context.Context, dt DocType, broken string) (an
 	return decodeInto(dt, content)
 }
 
-func buildUserPrompt(dt DocType, documentText string) string {
-	return fmt.Sprintf(`Extract structured data from the Brazilian document text below.
-Return ONLY a single JSON object matching this schema (no markdown fences, no commentary):
+func buildUserContent(dt DocType, doc preprocess.PreparedDocument) any {
+	prompt := buildUserPrompt(dt, doc)
+	if doc.Mode != "vision" || len(doc.Images) == 0 {
+		return prompt
+	}
 
-%s
+	parts := []groq.ContentPart{{Type: "text", Text: prompt}}
+	for _, img := range doc.Images {
+		mime := img.MIME
+		if mime == "" {
+			mime = "image/png"
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(img.Data))
+		parts = append(parts, groq.ContentPart{
+			Type:     "image_url",
+			ImageURL: &groq.ImageURL{URL: dataURL},
+		})
+	}
+	return parts
+}
 
-Document text:
----
-%s
----`, dt.SchemaHint(), documentText)
+func buildUserPrompt(dt DocType, doc preprocess.PreparedDocument) string {
+	var b strings.Builder
+	b.WriteString("Extract structured data from the Brazilian document")
+	if doc.Mode == "vision" {
+		b.WriteString(" image(s)")
+	} else {
+		b.WriteString(" text")
+	}
+	b.WriteString(" below.\n")
+	b.WriteString("Return ONLY a single JSON object matching this schema:\n\n")
+	b.WriteString(dt.SchemaHint())
+	b.WriteString("\n\n")
+	b.WriteString("Important extraction rules:\n")
+	b.WriteString("- CPF: find label \"CPF\" (CNH field 6). Copy ###.###.###-## exactly; 11 digits only. Do not leave empty if readable.\n")
+	b.WriteString("- CNH validade: use field 4b VALIDADE only. Field 4a is emissão — do not put 4a into validade.\n")
+	b.WriteString("- Birth date: field 3 only; double-check each year digit (9 vs 0).\n")
+	b.WriteString("- numero_documento: CNH field 7 Nº REGISTRO (not CPF).\n\n")
+
+	if strings.TrimSpace(doc.Text) != "" && doc.Mode == "text" {
+		b.WriteString("Document text:\n---\n")
+		b.WriteString(doc.Text)
+		b.WriteString("\n---\n")
+	}
+	if doc.Mode == "vision" {
+		b.WriteString("Read labeled fields from the attached image(s). Prefer printed field numbers/labels over nearby noise.\n")
+	}
+	return b.String()
 }
 
 func decodeInto(dt DocType, content string) (any, error) {
 	cleaned := stripFences(content)
+	if i := strings.Index(cleaned, "{"); i >= 0 {
+		if j := strings.LastIndex(cleaned, "}"); j > i {
+			cleaned = cleaned[i : j+1]
+		}
+	}
 	target := dt.EmptyResult()
 	if err := json.Unmarshal([]byte(cleaned), target); err != nil {
 		return nil, err
@@ -123,6 +202,19 @@ func decodeInto(dt DocType, content string) (any, error) {
 }
 
 func stripFences(s string) string {
+	s = strings.TrimSpace(s)
+	for {
+		start := strings.Index(s, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "</think>")
+		if end < 0 {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "```") {
 		s = strings.TrimPrefix(s, "```json")

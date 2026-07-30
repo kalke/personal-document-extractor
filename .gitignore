@@ -20,3 +20,4 @@ Thumbs.db
 # Go
 coverage.out
 *.test
+tmp/
