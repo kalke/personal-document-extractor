@@ -30,17 +30,3 @@ func (d Directory) UpsertFromAuth(ctx context.Context, in auth.UserSyncInput) (s
 	}
 	return u.ID, nil
 }
-
-func (d Directory) EnsureActive(ctx context.Context, userID string) error {
-	if d.Users == nil {
-		return auth.ErrUnauthorized
-	}
-	u, err := d.Users.GetByID(ctx, userID)
-	if err != nil {
-		return auth.ErrUnauthorized
-	}
-	if u.Status != "active" {
-		return auth.ErrUnauthorized
-	}
-	return nil
-}

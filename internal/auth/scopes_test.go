@@ -20,12 +20,12 @@ func TestScopesFromClaims(t *testing.T) {
 		},
 		{
 			name:  "scope_fields",
-			scope: "extract:write keys:manage openid",
-			want:  []string{ScopeExtractWrite, ScopeKeysManage, "openid"},
+			scope: "extract:write openid",
+			want:  []string{ScopeExtractWrite, "openid"},
 		},
 		{
 			name: "defaults_when_empty",
-			want: []string{ScopeExtractWrite, ScopeKeysManage},
+			want: []string{ScopeExtractWrite},
 		},
 	}
 	for _, tc := range cases {
@@ -35,5 +35,14 @@ func TestScopesFromClaims(t *testing.T) {
 				t.Fatalf("got %#v want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNewAuthenticatorRequiresOIDC(t *testing.T) {
+	if _, err := NewAuthenticator(Options{}); err == nil {
+		t.Fatal("expected error when issuer/audience empty")
+	}
+	if _, err := NewAuthenticator(Options{Issuer: "http://localhost:8443/realms/kalke"}); err == nil {
+		t.Fatal("expected error when only issuer set")
 	}
 }

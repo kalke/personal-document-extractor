@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,31 +13,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var (
-	ErrUnauthorized = errors.New("unauthorized")
-)
+var ErrUnauthorized = errors.New("unauthorized")
 
-type APIKeyRecord struct {
-	ID        string
-	UserID    string
-	Name      string
-	KeyPrefix string
-	KeyHash   string
-	Scopes    []string
-	ExpiresAt *time.Time
-	RevokedAt *time.Time
-	CreatedAt time.Time
-}
-
-type APIKeyLookup interface {
-	LookupByPrefix(ctx context.Context, prefix string) (APIKeyRecord, error)
-}
-
-// UserSync upserts the local users projection for JWT principals
-// and checks account status for API-key principals.
+// UserSync upserts the local users projection for JWT principals.
 type UserSync interface {
 	UpsertFromAuth(ctx context.Context, in UserSyncInput) (userID string, err error)
-	EnsureActive(ctx context.Context, userID string) error
 }
 
 type UserSyncInput struct {
@@ -49,7 +28,6 @@ type UserSyncInput struct {
 }
 
 type Authenticator struct {
-	keys       APIKeyLookup
 	users      UserSync
 	jwtEnabled bool
 	audience   string
@@ -58,24 +36,16 @@ type Authenticator struct {
 }
 
 type Options struct {
-	Keys     APIKeyLookup
 	Users    UserSync // optional; when set, JWT auth upserts local users
 	Issuer   string   // OIDC issuer URL, e.g. http://localhost:8443/realms/kalke
 	Audience string
 }
 
 func NewAuthenticator(opts Options) (*Authenticator, error) {
-	if opts.Keys == nil {
-		return nil, fmt.Errorf("api key lookup is required")
-	}
-	a := &Authenticator{keys: opts.Keys, users: opts.Users}
 	issuer := strings.TrimSpace(opts.Issuer)
 	audience := strings.TrimSpace(opts.Audience)
-	if issuer == "" && audience == "" {
-		return a, nil
-	}
 	if issuer == "" || audience == "" {
-		return nil, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE must both be set or both empty")
+		return nil, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required")
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
 	jwksURL, discoveredIssuer, err := discoverJWKS(issuer)
@@ -89,11 +59,13 @@ func NewAuthenticator(opts Options) (*Authenticator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jwks: %w", err)
 	}
-	a.jwtEnabled = true
-	a.audience = audience
-	a.issuer = issuer
-	a.jwks = k
-	return a, nil
+	return &Authenticator{
+		users:      opts.Users,
+		jwtEnabled: true,
+		audience:   audience,
+		issuer:     issuer,
+		jwks:       k,
+	}, nil
 }
 
 type oidcDiscovery struct {
@@ -131,46 +103,10 @@ func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (P
 	if token == "" {
 		return Principal{}, ErrUnauthorized
 	}
-	if strings.HasPrefix(token, APIKeyPrefix) {
-		return a.authenticateAPIKey(ctx, token)
-	}
-	if a.jwtEnabled {
-		return a.authenticateJWT(ctx, token)
-	}
-	return Principal{}, ErrUnauthorized
-}
-
-func (a *Authenticator) authenticateAPIKey(ctx context.Context, plaintext string) (Principal, error) {
-	prefix, ok := LookupPrefix(plaintext)
-	if !ok {
+	if !a.jwtEnabled {
 		return Principal{}, ErrUnauthorized
 	}
-	rec, err := a.keys.LookupByPrefix(ctx, prefix)
-	if err != nil {
-		return Principal{}, ErrUnauthorized
-	}
-	if rec.RevokedAt != nil {
-		return Principal{}, ErrUnauthorized
-	}
-	if rec.ExpiresAt != nil && time.Now().After(*rec.ExpiresAt) {
-		return Principal{}, ErrUnauthorized
-	}
-	want := HashAPIKey(plaintext)
-	if subtle.ConstantTimeCompare([]byte(rec.KeyHash), []byte(want)) != 1 {
-		return Principal{}, ErrUnauthorized
-	}
-	if a.users != nil && rec.UserID != "" {
-		if err := a.users.EnsureActive(ctx, rec.UserID); err != nil {
-			return Principal{}, ErrUnauthorized
-		}
-	}
-	return Principal{
-		Subject:  "api_key:" + rec.ID,
-		Kind:     KindAPIKey,
-		UserID:   rec.UserID,
-		APIKeyID: rec.ID,
-		Scopes:   append([]string(nil), rec.Scopes...),
-	}, nil
+	return a.authenticateJWT(ctx, token)
 }
 
 type oidcClaims struct {
@@ -218,7 +154,7 @@ func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (P
 }
 
 // scopesFromClaims prefers the permissions claim, then space-separated scope.
-// When neither is present, grants self-service defaults (bootstrap without IdP RBAC).
+// When neither is present, grants extract:write (bootstrap without IdP RBAC).
 func scopesFromClaims(permissions []string, scope string) []string {
 	if len(permissions) > 0 {
 		return append([]string(nil), permissions...)
@@ -226,5 +162,5 @@ func scopesFromClaims(permissions []string, scope string) []string {
 	if scope != "" {
 		return strings.Fields(scope)
 	}
-	return []string{ScopeExtractWrite, ScopeKeysManage}
+	return []string{ScopeExtractWrite}
 }

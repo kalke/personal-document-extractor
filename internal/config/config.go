@@ -59,8 +59,8 @@ func Load() (Config, error) {
 
 	oidcIssuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
 	oidcAudience := strings.TrimSpace(os.Getenv("OIDC_AUDIENCE"))
-	if (oidcIssuer == "") != (oidcAudience == "") {
-		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE must both be set or both empty")
+	if oidcIssuer == "" || oidcAudience == "" {
+		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required")
 	}
 
 	cfg := Config{

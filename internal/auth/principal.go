@@ -5,22 +5,19 @@ import "context"
 type Kind string
 
 const (
-	KindAPIKey Kind = "api_key"
-	KindJWT    Kind = "jwt"
+	KindJWT Kind = "jwt"
 )
 
 const (
 	ScopeExtractWrite = "extract:write"
-	ScopeKeysManage   = "keys:manage"
 	ScopeAdmin        = "admin"
 )
 
 type Principal struct {
-	Subject  string
-	Kind     Kind
-	UserID   string
-	APIKeyID string
-	Scopes   []string
+	Subject string
+	Kind    Kind
+	UserID  string
+	Scopes  []string
 }
 
 type ctxKey struct{}

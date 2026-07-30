@@ -8,6 +8,12 @@ import (
 	"github.com/kalke/personal-document-extractor/internal/config"
 )
 
+func withOIDC(t *testing.T) {
+	t.Helper()
+	t.Setenv("OIDC_ISSUER", "http://localhost:8443/realms/kalke")
+	t.Setenv("OIDC_AUDIENCE", "personal-document-extractor")
+}
+
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("GROQ_API_KEY", "test-key")
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost:5432/db?sslmode=disable")
@@ -19,8 +25,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "")
 	t.Setenv("GROQ_MODEL", "")
 	t.Setenv("TRUSTED_PROXIES", "")
-	t.Setenv("OIDC_ISSUER", "")
-	t.Setenv("OIDC_AUDIENCE", "")
+	withOIDC(t)
 	t.Setenv("RATE_LIMIT_PER_MINUTE", "")
 
 	cfg, err := config.Load()
@@ -55,6 +60,7 @@ func TestLoadTrustedProxies(t *testing.T) {
 	t.Setenv("REDIS_CACHE_TTL", "24h")
 	t.Setenv("LOG_LEVEL", "info")
 	t.Setenv("LOG_FORMAT", "text")
+	withOIDC(t)
 	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, 192.168.1.1")
 
 	cfg, err := config.Load()
@@ -78,6 +84,7 @@ func TestLoadTrustedProxies(t *testing.T) {
 }
 
 func TestLoadRequiresSecrets(t *testing.T) {
+	withOIDC(t)
 	t.Setenv("GROQ_API_KEY", "")
 	t.Setenv("DATABASE_URL", "postgres://localhost/db")
 	if _, err := config.Load(); err == nil {
@@ -88,6 +95,13 @@ func TestLoadRequiresSecrets(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	if _, err := config.Load(); err == nil {
 		t.Fatal("expected error for missing DATABASE_URL")
+	}
+
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("OIDC_ISSUER", "")
+	t.Setenv("OIDC_AUDIENCE", "")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected error for missing OIDC")
 	}
 }
 
@@ -100,8 +114,8 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		t.Setenv("REDIS_CACHE_TTL", "24h")
 		t.Setenv("LOG_LEVEL", "info")
 		t.Setenv("LOG_FORMAT", "text")
-		t.Setenv("OIDC_ISSUER", "")
-		t.Setenv("OIDC_AUDIENCE", "")
+		t.Setenv("OIDC_ISSUER", "http://localhost:8443/realms/kalke")
+		t.Setenv("OIDC_AUDIENCE", "personal-document-extractor")
 		t.Setenv("RATE_LIMIT_PER_MINUTE", "60")
 		t.Setenv("TRUSTED_PROXIES", "")
 	}
@@ -121,7 +135,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"log_format", func() { base(); t.Setenv("LOG_FORMAT", "yaml") }},
 		{"blank_key", func() { base(); t.Setenv("GROQ_API_KEY", "   ") }},
 		{"trusted_proxies", func() { base(); t.Setenv("TRUSTED_PROXIES", "10/bad") }},
-		{"oidc_pair", func() {
+		{"oidc_missing_audience", func() {
 			base()
 			t.Setenv("OIDC_ISSUER", "http://localhost:8443/realms/kalke")
 			t.Setenv("OIDC_AUDIENCE", "")

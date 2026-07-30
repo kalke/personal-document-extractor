@@ -70,9 +70,7 @@ func main() {
 	)
 
 	users := store.NewUsers(pool)
-	apiKeys := store.NewAPIKeys(pool)
 	authenticator, err := auth.NewAuthenticator(auth.Options{
-		Keys:     apiKeys,
 		Users:    identity.Directory{Users: users},
 		Issuer:   cfg.OIDCIssuer,
 		Audience: cfg.OIDCAudience,
@@ -89,7 +87,6 @@ func main() {
 		Cache:          redisCache,
 		Extractions:    store.NewExtractions(pool),
 		Users:          users,
-		APIKeys:        apiKeys,
 		TrustedProxies: cfg.TrustedProxies,
 		Auth:           authenticator,
 		RateLimit:      limiter,
