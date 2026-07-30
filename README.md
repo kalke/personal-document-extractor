@@ -1,6 +1,11 @@
 # Personal Document Extractor
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-green.svg)](openapi/openapi.yaml)
+
 Small Go API that turns Brazilian identity docs, address proofs, and invoices into structured JSON.
+
+**API contract:** [`openapi/openapi.yaml`](openapi/openapi.yaml) (render with [Swagger Editor](https://editor.swagger.io/) or Redoc).
 
 Upload a PDF or image with a `doc_type`, get typed fields back. Extraction uses Groq vision; PDFs are rasterized locally with `pdftoppm`. Successful results are cached in Redis and stored in Postgres.
 
@@ -14,9 +19,10 @@ make setup                 # creates .env from .env.example
 
 make up                    # build + start api, postgres, redis
 make ready                 # wait until DB is up: {"status":"ready",...}
+make apikey NAME=local     # create API key (secret printed once)
 ```
 
-API listens on `http://localhost:8080`.
+API listens on `http://localhost:8080`. `/v1/extract` requires `Authorization: Bearer <api-key-or-jwt>`.
 
 ```bash
 make logs                  # follow all logs
@@ -41,6 +47,7 @@ make destroy               # stop and delete volumes
 | `make build` | Build images |
 | `make migrate` | Apply goose migrations **in Docker** |
 | `make migrations NAME=…` | Create a new SQL migration file |
+| `make apikey NAME=…` | Create a hashed API key (`SCOPES=` optional) |
 | `make health` / `make ready` | Hit `/health` and `/ready` |
 | `make lint` | golangci-lint (same as CI) |
 | `make test` | Unit + integration tests (no Docker) |
@@ -72,7 +79,10 @@ You normally do **not** need `make migrate` after `make up` — the API migrates
 ## Extract something
 
 ```bash
+export API_KEY='pde_live_…'   # from make apikey
+
 curl -X POST "http://localhost:8080/v1/extract?doc_type=identity_document" \
+  -H "Authorization: Bearer ${API_KEY}" \
   -F "file=@./documento.pdf"
 ```
 
@@ -105,7 +115,28 @@ Postgres required (`503` if down). Redis is best-effort informational only:
 make ready
 ```
 
+### Authentication and authorization
+
+| Concern | Mechanism |
+|---|---|
+| **AuthN** (who) | `Authorization: Bearer` — API key (`pde_live_…`) and/or Auth0 OIDC JWT |
+| **AuthZ** (what) | Scopes on the key / JWT `permissions` claim |
+
+| Scope | Allows |
+|---|---|
+| `extract:write` | `POST /v1/extract` |
+| `keys:manage` | Reserved for future key admin HTTP API |
+| `admin` | All scopes |
+
+API keys are stored as **SHA-256 hashes** with a public prefix for lookup; the secret is shown once by `make apikey`. Auth0 is optional: set both `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` to accept RS256 JWTs (issuer `https://{domain}/`, permissions from the Auth0 RBAC `permissions` claim or space-delimited `scope`). `/health` and `/ready` stay public.
+
+### Rate limiting
+
+Authenticated extract calls are limited per principal (API key id / JWT `sub`) via Redis fixed 1-minute windows (`RATE_LIMIT_PER_MINUTE`, default **60**). Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. On exceed or Redis failure the API returns **429** (fail-closed) with `Retry-After`.
+
 ### `POST /v1/extract`
+
+Requires Bearer auth + `extract:write` (or `admin`).
 
 Query:
 
@@ -134,8 +165,11 @@ Example response (only `doc_type` + `data` — no `meta`):
 | Status | When | Typical `error` |
 |---|---|---|
 | `400` | Missing `doc_type` / file, bad media, MIME mismatch | validation message / `unknown doc_type` |
+| `401` | Missing/invalid Bearer token | `unauthorized` / `missing or invalid authorization` |
+| `403` | Authenticated but missing scope | `forbidden` |
 | `413` | Upload too large | `uploaded file exceeds size limit` |
 | `422` | Model JSON could not be parsed | `could not process document` |
+| `429` | Rate limit exceeded or Redis limiter down | `rate limit exceeded` / `rate limit unavailable` |
 | `502` | Groq request failed | `extraction provider unavailable` |
 | `503` | `/ready` when Postgres is down | — |
 
@@ -156,7 +190,8 @@ Body shape: `{"error":"…"}`. Provider internals are logged server-side, not re
 - **Hit:** return Redis payload only (no Postgres write)
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
-- **Request origin:** on persist, store `client_ip` (X-Forwarded-For / X-Real-IP / RemoteAddr) and `user_agent` in Postgres only — never returned in the API response
+- **Request origin:** on persist, store `client_ip` (trusted-proxy aware) and `user_agent` in Postgres only — never returned in the API response
+- **Principal:** on persist, store `api_key_id` / `auth_subject` for audit
 
 ## Configuration
 
@@ -167,9 +202,12 @@ Copy from [`.env.example`](.env.example) via `make setup`:
 | `GROQ_API_KEY` | — | **required** |
 | `GROQ_MODEL` | `qwen/qwen3.6-27b` | vision model |
 | `PORT` | `8080` | host publish port for Compose |
-| `DATABASE_URL` | example | required for `make run`; Compose overrides with internal URL |
+| `DATABASE_URL` | example | required for `make run` / `make apikey`; Compose overrides with internal URL |
 | `REDIS_ADDR` | `localhost:6379` | for `make run`; Compose uses `redis:6379` |
 | `REDIS_CACHE_TTL` | `24h` | Go duration; must be `> 0` |
+| `RATE_LIMIT_PER_MINUTE` | `60` | per authenticated principal; must be `> 0` |
+| `AUTH0_DOMAIN` | empty | Auth0 tenant host (with `AUTH0_AUDIENCE`) |
+| `AUTH0_AUDIENCE` | empty | API audience for JWT validation |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `text` | Compose forces `json` |
 | `TRUSTED_PROXIES` | empty | CIDRs/IPs that may set `X-Forwarded-For` / `X-Real-IP`; empty = use `RemoteAddr` only |
@@ -210,21 +248,27 @@ make ci            # lint + test + binary build
 - **Unit tests** cover config, normalize, doctype `Normalize`, extract JSON decoding, cache keys, and fail-open nil paths.
 - **Integration tests** exercise `/health`, `/ready`, and `/v1/extract` with fakes + [miniredis](https://github.com/alicebob/miniredis) (validate-before-cache, hit/miss, stable errors, persistence). No live Groq/Postgres required.
 
-GitHub Actions runs **lint** (golangci-lint), **`make test`**, binary builds, then **`docker build`**. Locally, `make ci` covers lint + test + build without Docker.
+GitHub Actions runs **lint**, **goose migrate** against a Postgres 18 service, **`make test`** (including store integration tests when `DATABASE_URL` is set), binary builds, then **`docker build`**. Locally, `make ci` covers lint + test + build without Docker; set `DATABASE_URL` to exercise Postgres integration tests.
 
 ## Layout
 
 ```
+LICENSE                 Apache-2.0
+openapi/openapi.yaml    Public API contract
 Makefile                Docker-first commands
 docker-compose.yml      api + postgres + redis
 Dockerfile              api + migrate binaries
 migrations/             goose SQL (embedded)
 cmd/api                 HTTP entrypoint (migrates on boot)
 cmd/migrate             goose up CLI
+cmd/apikey              Create API keys (secret once)
 internal/config         Env
 internal/db             pgx pool
-internal/cache          Redis
-internal/store          Postgres extractions
+internal/auth           API keys + Auth0 JWT
+internal/authz          Scope checks
+internal/ratelimit      Redis per-principal limiter
+internal/cache          Redis extract cache
+internal/store          Postgres extractions + api_keys
 internal/httpapi        /health, /ready, /v1/extract
 internal/preprocess     validation, PDF render, image compact
 internal/normalize      CPF/CNPJ/CEP/date helpers
@@ -232,6 +276,13 @@ internal/llm/groq       Groq client
 internal/extract        Prompt → LLM → decode → normalize
 internal/doctypes/*     Per-type schema + prompts
 ```
+
+## Roadmap (intentionally out of v1)
+
+- Auth0 login UI / dashboard
+- HTTP API for key admin (`keys:manage`)
+- Fine-grained AuthZ (OPA / SpiceDB)
+- Multi-tenant orgs
 
 ## Adding a document type
 
