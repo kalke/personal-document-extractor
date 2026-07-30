@@ -200,6 +200,9 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if ex.callCount() != 1 || st.len() != 1 {
 		t.Fatalf("calls=%d rows=%d", ex.callCount(), st.len())
 	}
+	if st.rows[0].ClientIP == "" {
+		t.Fatal("expected client_ip persisted")
+	}
 
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
@@ -363,7 +366,9 @@ func multipartRequest(t *testing.T, url, filename string, data []byte) *http.Req
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, url, &buf)
+	req.RemoteAddr = "203.0.113.10:54321"
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("User-Agent", "extract-test/1.0")
 	return req
 }
 

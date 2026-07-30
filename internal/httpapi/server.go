@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -28,10 +29,11 @@ const (
 )
 
 type Server struct {
-	extractor   Extractor
-	pool        DBPinger
-	cache       ResultCache
-	extractions ExtractionStore
+	extractor      Extractor
+	pool           DBPinger
+	cache          ResultCache
+	extractions    ExtractionStore
+	trustedProxies []*net.IPNet
 }
 
 func New(deps Deps) (http.Handler, error) {
@@ -39,10 +41,11 @@ func New(deps Deps) (http.Handler, error) {
 		return nil, fmt.Errorf("extractor is required")
 	}
 	s := &Server{
-		extractor:   deps.Extractor,
-		pool:        deps.Pool,
-		cache:       deps.Cache,
-		extractions: deps.Extractions,
+		extractor:      deps.Extractor,
+		pool:           deps.Pool,
+		cache:          deps.Cache,
+		extractions:    deps.Extractions,
+		trustedProxies: deps.TrustedProxies,
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -135,7 +138,13 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(data)
 	shaHex := hex.EncodeToString(sum[:])
-	log = log.With("doc_type", docType, "content_sha256", shaHex, "refresh", refresh)
+	clientIP, userAgent := s.requestOrigin(r)
+	log = log.With(
+		"doc_type", docType,
+		"content_sha256", shaHex,
+		"refresh", refresh,
+		"client_ip", clientIP,
+	)
 
 	if !refresh {
 		if cached, ok := s.lookupCache(r.Context(), docType, shaHex); ok {
@@ -158,30 +167,34 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 	result.Meta.ContentSHA256 = shaHex
 	result.Meta.Cache = "miss"
 	s.persist(persistArgs{
-		reqID:    reqID,
-		docType:  docType,
-		shaHex:   shaHex,
-		filename: filename,
-		doc:      doc,
-		result:   result,
-		duration: time.Since(start),
-		refresh:  refresh,
-		log:      log,
+		reqID:     reqID,
+		docType:   docType,
+		shaHex:    shaHex,
+		filename:  filename,
+		doc:       doc,
+		result:    result,
+		duration:  time.Since(start),
+		refresh:   refresh,
+		clientIP:  clientIP,
+		userAgent: userAgent,
+		log:       log,
 	})
 	log.Info("extract", "cache", "miss", "mode", result.Meta.Mode, "images", result.Meta.Images)
 	writeJSON(w, http.StatusOK, toExtractResponse(result))
 }
 
 type persistArgs struct {
-	reqID    string
-	docType  string
-	shaHex   string
-	filename string
-	doc      preprocess.PreparedDocument
-	result   extract.Result
-	duration time.Duration
-	refresh  bool
-	log      *slog.Logger
+	reqID     string
+	docType   string
+	shaHex    string
+	filename  string
+	doc       preprocess.PreparedDocument
+	result    extract.Result
+	duration  time.Duration
+	refresh   bool
+	clientIP  string
+	userAgent string
+	log       *slog.Logger
 }
 
 func (s *Server) lookupCache(ctx context.Context, docType, shaHex string) (extract.Result, bool) {
@@ -219,6 +232,8 @@ func (s *Server) persist(args persistArgs) {
 		Mode:          args.result.Meta.Mode,
 		Model:         args.result.Meta.Model,
 		RequestID:     args.reqID,
+		ClientIP:      args.clientIP,
+		UserAgent:     args.userAgent,
 		Status:        "success",
 		Result:        args.result,
 		Duration:      args.duration,

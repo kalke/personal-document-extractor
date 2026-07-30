@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "")
 	t.Setenv("LOG_FORMAT", "")
 	t.Setenv("GROQ_MODEL", "")
+	t.Setenv("TRUSTED_PROXIES", "")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -33,6 +35,39 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.LogLevel != "info" || cfg.LogFormat != "text" {
 		t.Fatalf("log defaults: %q %q", cfg.LogLevel, cfg.LogFormat)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Fatalf("TrustedProxies: got %v", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadTrustedProxies(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "k")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("PORT", "8080")
+	t.Setenv("REDIS_DB", "0")
+	t.Setenv("REDIS_CACHE_TTL", "24h")
+	t.Setenv("LOG_LEVEL", "info")
+	t.Setenv("LOG_FORMAT", "text")
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, 192.168.1.1")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Fatalf("len=%d", len(cfg.TrustedProxies))
+	}
+	if !cfg.TrustedProxies[0].Contains(net.ParseIP("10.1.2.3")) {
+		t.Fatal("expected 10.0.0.0/8")
+	}
+	if !cfg.TrustedProxies[1].Contains(net.ParseIP("192.168.1.1")) {
+		t.Fatal("expected 192.168.1.1/32")
+	}
+
+	t.Setenv("TRUSTED_PROXIES", "not-an-ip")
+	if _, err := config.Load(); err == nil {
+		t.Fatal("expected invalid TRUSTED_PROXIES error")
 	}
 }
 
@@ -75,6 +110,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"log_level", func() { base(); t.Setenv("LOG_LEVEL", "verbose") }},
 		{"log_format", func() { base(); t.Setenv("LOG_FORMAT", "yaml") }},
 		{"blank_key", func() { base(); t.Setenv("GROQ_API_KEY", "   ") }},
+		{"trusted_proxies", func() { base(); t.Setenv("TRUSTED_PROXIES", "10/bad") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

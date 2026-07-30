@@ -67,10 +67,11 @@ func main() {
 	)
 
 	handler, err := httpapi.New(httpapi.Deps{
-		Extractor:   svc,
-		Pool:        pool,
-		Cache:       redisCache,
-		Extractions: store.NewExtractions(pool),
+		Extractor:      svc,
+		Pool:           pool,
+		Cache:          redisCache,
+		Extractions:    store.NewExtractions(pool),
+		TrustedProxies: cfg.TrustedProxies,
 	})
 	if err != nil {
 		slog.Error("httpapi", "err", err)

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"net"
 
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/preprocess"
@@ -30,8 +31,9 @@ type DBPinger interface {
 }
 
 type Deps struct {
-	Extractor   Extractor
-	Pool        DBPinger
-	Cache       ResultCache
-	Extractions ExtractionStore
+	Extractor      Extractor
+	Pool           DBPinger
+	Cache          ResultCache
+	Extractions    ExtractionStore
+	TrustedProxies []*net.IPNet
 }
