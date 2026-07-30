@@ -114,7 +114,7 @@ Query:
 
 Body: `multipart/form-data` field `file`.
 
-Example response:
+Example response (only `doc_type` + `data` — no `meta`):
 
 ```json
 {
@@ -127,20 +127,9 @@ Example response:
     "data_nascimento": "1990-01-15",
     "orgao_emissor": "DETRAN/SP",
     "validade": "2030-12-31"
-  },
-  "meta": {
-    "model": "qwen/qwen3.6-27b",
-    "chars": 1200,
-    "mode": "vision",
-    "images": 1,
-    "filename": "documento.pdf",
-    "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "cache": "miss"
   }
 }
 ```
-
-`meta.cache` is `hit` or `miss`. `meta.content_sha256` is SHA-256 of the **raw upload bytes**.
 
 | Status | When | Typical `error` |
 |---|---|---|
@@ -167,6 +156,7 @@ Body shape: `{"error":"…"}`. Provider internals are logged server-side, not re
 - **Hit:** return Redis payload only (no Postgres write)
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
+- **Request origin:** on persist, store `client_ip` (X-Forwarded-For / X-Real-IP / RemoteAddr) and `user_agent` in Postgres only — never returned in the API response
 
 ## Configuration
 
@@ -182,6 +172,7 @@ Copy from [`.env.example`](.env.example) via `make setup`:
 | `REDIS_CACHE_TTL` | `24h` | Go duration; must be `> 0` |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `text` | Compose forces `json` |
+| `TRUSTED_PROXIES` | empty | CIDRs/IPs that may set `X-Forwarded-For` / `X-Real-IP`; empty = use `RemoteAddr` only |
 | `POSTGRES_USER` / `PASSWORD` / `DB` | `extractor` | Compose Postgres |
 
 Postgres/Redis Compose ports bind to `127.0.0.1` only.
@@ -219,7 +210,7 @@ make ci            # lint + test + binary build
 - **Unit tests** cover config, normalize, doctype `Normalize`, extract JSON decoding, cache keys, and fail-open nil paths.
 - **Integration tests** exercise `/health`, `/ready`, and `/v1/extract` with fakes + [miniredis](https://github.com/alicebob/miniredis) (validate-before-cache, hit/miss, stable errors, persistence). No live Groq/Postgres required.
 
-GitHub Actions also runs `docker build`; `make ci` is the local gate without requiring Docker.
+GitHub Actions runs **lint** (golangci-lint), **`make test`**, binary builds, then **`docker build`**. Locally, `make ci` covers lint + test + build without Docker.
 
 ## Layout
 
