@@ -6,14 +6,12 @@ info:
     Extract structured JSON from Brazilian identity documents, address proofs,
     and invoices.
 
-    **AuthN:** `Authorization: Bearer` with an API key (`pde_live_…`) or an OIDC
-    access token (RS256). Human login (password/social/MFA) lives in an external
-    OIDC IdP (e.g. kalke-auth); this API stores a local `users` projection and
-    owns API keys.
+    **AuthN:** `Authorization: Bearer` with an OIDC access token (RS256) from
+    an external IdP (e.g. kalke-auth / Keycloak). Humans use password/PKCE;
+    machines use client_credentials. This API stores a local `users` projection.
 
-    **AuthZ scopes:** `extract:write`, `keys:manage`, `admin` (implies all).
-    JWT tokens without IdP `permissions` receive default
-    `extract:write` + `keys:manage`.
+    **AuthZ scopes:** `extract:write`, `admin` (implies all).
+    JWT tokens without IdP `permissions` receive default `extract:write`.
 
     **Errors:** unless noted, error bodies are `{"error":"<message>"}`.
   license:
@@ -25,7 +23,6 @@ servers:
 tags:
   - name: health
   - name: users
-  - name: api-keys
   - name: extract
 security:
   - bearerAuth: []
@@ -76,7 +73,7 @@ paths:
       tags: [users]
       summary: Current user profile
       description: |
-        Any authenticated principal (JWT or API key) with a linked `user_id`.
+        Any authenticated OIDC principal with a linked `user_id`.
         No scope required. Disabled users receive 401.
       operationId: getMe
       responses:
@@ -98,135 +95,7 @@ paths:
                 users_not_configured:
                   value: { error: users not configured }
 
-  /v1/api-keys:
-    get:
-      tags: [api-keys]
-      summary: List API keys for the current user
-      description: Requires `keys:manage` or `admin`. Includes revoked keys (`revoked_at` set).
-      operationId: listAPIKeys
-      responses:
-        "200":
-          description: Key metadata (never includes secrets)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/APIKeyListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          description: Store failure
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                list_failed:
-                  value: { error: could not list api keys }
-    post:
-      tags: [api-keys]
-      summary: Create an API key for the current user
-      description: |
-        Requires `keys:manage` or `admin`.
-        Defaults: `name=default`, `scopes=["extract:write"]`.
-        Empty body is treated as `{}`. Callers without `admin` cannot request `admin` scope.
-        Secret is returned **once**.
-      operationId: createAPIKey
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAPIKeyRequest"
-            examples:
-              default:
-                value: {}
-              named:
-                value: { name: web, scopes: [extract:write] }
-      responses:
-        "201":
-          description: Created; `secret` shown once
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/APIKeyCreated"
-        "400":
-          description: Invalid body or unknown scope
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                invalid_json:
-                  value: { error: invalid json body }
-                unknown_scope:
-                  value: { error: unknown scope }
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          description: Missing scope or cannot mint admin keys
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                forbidden:
-                  value: { error: forbidden }
-                cannot_admin:
-                  value: { error: cannot create admin keys }
-        "500":
-          description: Generation or store failure
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                create_failed:
-                  value: { error: could not create api key }
 
-  /v1/api-keys/{id}:
-    delete:
-      tags: [api-keys]
-      summary: Revoke an owned API key
-      description: Requires `keys:manage` or `admin`. Soft-revoke (`revoked_at`).
-      operationId: revokeAPIKey
-      parameters:
-        - $ref: "#/components/parameters/APIKeyID"
-      responses:
-        "204":
-          description: Revoked (empty body)
-        "400":
-          description: Missing path id
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                missing_id:
-                  value: { error: missing key id }
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: Key not found for this user (or already revoked)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                not_found:
-                  value: { error: api key not found }
-        "500":
-          description: Store failure
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorBody"
-              examples:
-                revoke_failed:
-                  value: { error: could not revoke api key }
 
   /v1/extract:
     post:
@@ -362,23 +231,15 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: "API key (pde_live_…) or OIDC JWT"
+      bearerFormat: "OIDC JWT"
       description: |
-        Pass either a hashed API key secret or an OIDC access token.
+        Pass an OIDC access token from the configured IdP.
         Middleware errors when missing/invalid:
         - `missing or invalid authorization`
         - `unauthorized`
 
   parameters:
-    APIKeyID:
-      name: id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
 
-  headers:
     X-RateLimit-Limit:
       description: Requests allowed per fixed 1-minute window
       schema:
@@ -395,7 +256,7 @@ components:
   schemas:
     Scope:
       type: string
-      enum: [extract:write, keys:manage, admin]
+      enum: [extract:write, admin]
 
     DocType:
       type: string
@@ -482,7 +343,7 @@ components:
           format: uuid
         auth_subject:
           type: string
-          description: OIDC `sub` or `system:ops` / similar
+          description: OIDC `sub` (human or service account)
         email:
           type: string
         email_verified:
@@ -494,72 +355,13 @@ components:
           enum: [active, disabled]
         auth_kind:
           type: string
-          enum: [api_key, jwt]
+          enum: [jwt]
         scopes:
           type: array
           items:
             $ref: "#/components/schemas/Scope"
 
-    CreateAPIKeyRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        name:
-          type: string
-          description: Defaults to `default` when omitted/blank
-        scopes:
-          type: array
-          items:
-            $ref: "#/components/schemas/Scope"
-          description: Defaults to `[extract:write]` when omitted/empty
 
-    APIKey:
-      type: object
-      required: [id, name, key_prefix, scopes, created_at]
-      additionalProperties: false
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        key_prefix:
-          type: string
-          description: Public lookup prefix (not the secret)
-        scopes:
-          type: array
-          items:
-            $ref: "#/components/schemas/Scope"
-        expires_at:
-          type: string
-          format: date-time
-        revoked_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-
-    APIKeyListResponse:
-      type: object
-      required: [keys]
-      additionalProperties: false
-      properties:
-        keys:
-          type: array
-          items:
-            $ref: "#/components/schemas/APIKey"
-
-    APIKeyCreated:
-      allOf:
-        - $ref: "#/components/schemas/APIKey"
-        - type: object
-          required: [secret]
-          additionalProperties: false
-          properties:
-            secret:
-              type: string
-              description: Plaintext API key; shown only once
 
     ExtractResponse:
       type: object

@@ -46,8 +46,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       REDIS_CACHE_TTL: ${REDIS_CACHE_TTL:-24h}
-      # OIDC works when the issuer is reachable from this container AND matches token `iss`.
-      # Local JWT smoke: prefer host `make run` with OIDC_* (see docs/COMO-FUNCIONA.md).
+      # Required OIDC (host JWT smoke: make setup-oidc + make run).
+      # localhost inside the API container is not the host — prefer host run for JWT.
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}

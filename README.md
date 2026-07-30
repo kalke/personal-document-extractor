@@ -6,8 +6,6 @@
 Small Go API that turns Brazilian identity docs, address proofs, and invoices into structured JSON.
 
 **API contract:** [`openapi/openapi.yaml`](openapi/openapi.yaml) (render with [Swagger Editor](https://editor.swagger.io/) or Redoc).  
-**Arquitetura (PT-BR):** [`docs/COMO-FUNCIONA.md`](docs/COMO-FUNCIONA.md) — como funciona, decisões, auth, usuários e M2M.
-
 Upload a PDF or image with a `doc_type`, get typed fields back. Extraction uses Groq vision; PDFs are rasterized locally with `pdftoppm`. Successful results are cached in Redis and stored in Postgres.
 
 ## Quick start (Docker)
@@ -20,13 +18,14 @@ Sibling IdP (optional, for JWT): clone/create [`kalke-auth`](../kalke-auth) next
 make setup                 # creates .env (+ kalke-auth/.env if sibling exists)
 # edit .env → set GROQ_API_KEY
 
-make up                    # build + start api, postgres, redis
-make ready                 # wait until DB is up: {"status":"ready",...}
-make apikey NAME=local     # create extract:write API key (secret once)
-make admin                 # create admin API key (scope=admin; secret once)
+make setup-oidc            # required OIDC_ISSUER / OIDC_AUDIENCE (kalke-auth)
+make auth-up               # Keycloak behind Caddy on :8443
+make deps-up               # postgres + redis
+make run                   # API on host (OIDC discovery needs reachable issuer)
+make ready
 ```
 
-API listens on `http://localhost:8080`. `/v1/extract` requires `Authorization: Bearer <api-key-or-jwt>`.
+API listens on `http://localhost:8080`. All `/v1/*` routes require `Authorization: Bearer <oidc-jwt>`.
 
 ### Full local stack (API + OIDC IdP)
 
@@ -34,9 +33,9 @@ API listens on `http://localhost:8080`. `/v1/extract` requires `Authorization: B
 make setup
 # set GROQ_API_KEY in .env
 
-make up-all                # kalke-auth (Caddy:8443) + this Compose stack
-make auth-jwks             # sanity: JWKS via public proxy
-make apikey NAME=local     # M2M still works without OIDC env
+make up-all                # kalke-auth + Compose API (JWT from host `make run` preferred)
+make auth-jwks
+make auth-m2m-token        # client_credentials token for machines
 ```
 
 ### JWT smoke (host API + kalke-auth)
@@ -48,7 +47,8 @@ make setup-oidc            # writes OIDC_ISSUER / OIDC_AUDIENCE into .env
 make auth-up
 make deps-up               # postgres + redis only
 make run                   # API on host (separate terminal)
-make smoke-oidc            # demo token → GET /v1/me
+make smoke-oidc            # human password token → /v1/me
+make smoke-m2m             # client_credentials → /v1/me
 # or: make me TOKEN=$(make -s auth-token)
 ```
 
@@ -82,11 +82,11 @@ make destroy               # stop and delete volumes
 | `make build` | Build images |
 | `make migrate` | Apply goose migrations **in Docker** |
 | `make migrations NAME=…` | Create a new SQL migration file |
-| `make apikey NAME=…` | Create a hashed API key (`SCOPES=` optional) |
-| `make admin` | Create an admin API key (`NAME=` optional, default `admin`) |
 | `make health` / `make ready` | Hit `/health` and `/ready` |
-| `make me` | `GET /v1/me` (`API_KEY=` or `TOKEN=`) |
-| `make extract FILE=…` | `POST /v1/extract` (`API_KEY=` or `TOKEN=`) |
+| `make auth-token` / `auth-m2m-token` | Human / M2M JWT from kalke-auth |
+| `make smoke-oidc` / `smoke-m2m` | Token → `GET /v1/me` |
+| `make me` | `GET /v1/me` (`TOKEN=` required) |
+| `make extract FILE=…` | `POST /v1/extract` (`TOKEN=` required) |
 | `make lint` | golangci-lint (same as CI) |
 | `make test` | Unit + integration tests (no Docker) |
 | `make test-race` / `make test-cover` | Race detector / coverage |
@@ -117,10 +117,10 @@ You normally do **not** need `make migrate` after `make up` — the API migrates
 ## Extract something
 
 ```bash
-export API_KEY='pde_live_…'   # from make apikey
+export TOKEN="$(make -s auth-m2m-token)"   # or: make -s auth-token
 
 curl -X POST "http://localhost:8080/v1/extract?doc_type=identity_document" \
-  -H "Authorization: Bearer ${API_KEY}" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -F "file=@./documento.pdf"
 ```
 
@@ -157,39 +157,34 @@ make ready
 
 | Concern | Mechanism |
 |---|---|
-| **AuthN** (who) | `Authorization: Bearer` — API key (`pde_live_…`) and/or OIDC JWT |
-| **AuthZ** (what) | Scopes on the key / JWT `permissions` claim |
+| **AuthN** (who) | `Authorization: Bearer` — OIDC JWT from [`kalke-auth`](../kalke-auth) (Keycloak) |
+| **AuthZ** (what) | JWT `permissions` claim (realm roles) |
 
 | Scope | Allows |
 |---|---|
 | `extract:write` | `POST /v1/extract` |
-| `keys:manage` | `GET/POST/DELETE /v1/api-keys` (own keys) |
 | `admin` | All scopes |
 
-**Users:** Human login lives in an external **OIDC IdP** (local default: sibling repo [`kalke-auth`](../kalke-auth) — Keycloak behind Caddy). This API keeps a local `users` row keyed by OIDC `sub` (`auth_subject`) and owns `api_keys.user_id`. There is **no** password stored in Postgres.
+**Human:** password (dev `kalke-cli`) or Authorization Code + PKCE (`kalke-spa`).  
+**M2M:** Keycloak `client_credentials` (`pde-m2m`) — no proprietary product API keys.
 
-On JWT auth the API upserts `users` and exposes:
+This API keeps a local `users` row keyed by OIDC `sub` (`auth_subject`). There is **no** password and **no** API-key secret stored in Postgres.
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/v1/me` | Current user profile |
-| `GET` | `/v1/api-keys` | List own keys (prefix only) |
-| `POST` | `/v1/api-keys` | Create key for self (default scope `extract:write`; secret once) |
-| `DELETE` | `/v1/api-keys/{id}` | Revoke own key |
+| `GET` | `/v1/me` | Current user / service-account projection |
 
-API keys are **SHA-256 hashed** with a public prefix. Bootstrap ops keys: `make apikey` / `make admin` (attached to `system:ops`). Set `OIDC_ISSUER` + `OIDC_AUDIENCE` for JWT. JWKS is resolved via OIDC discovery (`/.well-known/openid-configuration`). If the token has no `permissions`, the API grants default `extract:write` + `keys:manage`. `/health` and `/ready` stay public.
+`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` defaults to `extract:write`. `/health` and `/ready` stay public.
 
-#### OIDC setup (website-ready)
+#### OIDC setup
 
-1. Ensure sibling [`kalke-auth`](../kalke-auth) exists, then `make auth-up` (or `make up-all`).
-2. `make setup-oidc` (or set manually):
-   - `OIDC_ISSUER=http://localhost:8443/realms/kalke`
-   - `OIDC_AUDIENCE=personal-document-extractor`
-3. SPA: Authorization Code + PKCE (`kalke-spa` client); send access token as `Authorization: Bearer`.
-4. Dev smoke: `make smoke-oidc` (host API) or `make me TOKEN=$(make -s auth-token)`.
-5. Optional IdP roles → claim `permissions`: `extract:write`, `keys:manage`, `admin`.
+1. Sibling [`kalke-auth`](../kalke-auth): `make auth-up` (re-import realm after changes with `make -C ../kalke-auth destroy && make auth-up`).
+2. `make setup-oidc`
+3. Host API: `make deps-up && make run`
+4. Human smoke: `make smoke-oidc` · M2M smoke: `make smoke-m2m`
+5. IdP roles → `permissions`: `extract:write`, `admin`
 
-When the API runs **inside Docker**, `localhost` is the container — prefer host `make run` for JWT smoke, or align `KC_HOSTNAME` / `OIDC_ISSUER` to a host-reachable name.
+When the API runs **inside Docker**, `localhost` is the container — prefer host `make run` for JWT, or align `KC_HOSTNAME` / `OIDC_ISSUER`.
 
 ### Rate limiting
 
@@ -254,7 +249,7 @@ Body shape for failures: `{"error":"…"}`. Full status/message catalog: [`opena
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
 - **Request origin:** on persist, store `client_ip` (trusted-proxy aware) and `user_agent` in Postgres only — never returned in the API response
-- **Principal:** on persist, store `api_key_id` / `auth_subject` for audit
+- **Principal:** on persist, store `auth_subject` / `user_id` for audit
 
 ## Configuration
 
@@ -265,12 +260,12 @@ Copy from [`.env.example`](.env.example) via `make setup`:
 | `GROQ_API_KEY` | — | **required** |
 | `GROQ_MODEL` | `qwen/qwen3.6-27b` | vision model |
 | `PORT` | `8080` | host publish port for Compose |
-| `DATABASE_URL` | example | required for `make run` / `make apikey`; Compose overrides with internal URL |
+| `DATABASE_URL` | example | required for `make run`; Compose overrides with internal URL |
 | `REDIS_ADDR` | `localhost:6379` | for `make run`; Compose uses `redis:6379` |
 | `REDIS_CACHE_TTL` | `24h` | Go duration; must be `> 0` |
 | `RATE_LIMIT_PER_MINUTE` | `60` | per authenticated principal; must be `> 0` |
-| `OIDC_ISSUER` | empty | OIDC issuer URL (with `OIDC_AUDIENCE`) |
-| `OIDC_AUDIENCE` | empty | API audience for JWT validation |
+| `OIDC_ISSUER` | — | **required** OIDC issuer URL |
+| `OIDC_AUDIENCE` | — | **required** API audience |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `text` | Compose forces `json` |
 | `TRUSTED_PROXIES` | empty | CIDRs/IPs that may set `X-Forwarded-For` / `X-Real-IP`; empty = use `RemoteAddr` only |
@@ -324,15 +319,14 @@ Dockerfile              api + migrate binaries
 migrations/             goose SQL (embedded)
 cmd/api                 HTTP entrypoint (migrates on boot)
 cmd/migrate             goose up CLI
-cmd/apikey              Create API keys (secret once)
 internal/config         Env
 internal/db             pgx pool
-internal/auth           API keys + OIDC JWT
+internal/auth           OIDC JWT (JWKS discovery)
 internal/identity       JWT → local users upsert
 internal/authz          Scope checks
 internal/ratelimit      Redis per-principal limiter
 internal/cache          Redis extract cache
-internal/store          users, api_keys, extractions
+internal/store          users, extractions
 internal/httpapi        /health, /ready, /v1/*
 internal/preprocess     validation, PDF render, image compact
 internal/normalize      CPF/CNPJ/CEP/date helpers
@@ -343,8 +337,8 @@ internal/doctypes/*     Per-type schema + prompts
 
 ## Roadmap (intentionally out of v1)
 
-- Website / OIDC login UI (Next.js SPA + kalke-auth / any IdP)
-- Apple / Google / GitHub social IdP connections
+- Website / OIDC login UI (Next.js SPA + kalke-auth)
+- Social IdP connections in Keycloak
 - Web3 wallet linking (`user_identities` when needed)
 - Fine-grained AuthZ (OPA / SpiceDB)
 - Multi-tenant orgs / billing

@@ -34,7 +34,7 @@ setup: ## Create .env from .env.example if missing; ensure sibling kalke-auth .e
 			echo "Created $(KALKE_AUTH_DIR)/.env"; \
 		fi; \
 	else \
-		echo "Note: $(KALKE_AUTH_DIR) not found (optional OIDC IdP). Clone/create kalke-auth beside this repo."; \
+		echo "Note: $(KALKE_AUTH_DIR) not found. OIDC IdP (kalke-auth) is required — place it beside this repo."; \
 	fi
 
 .PHONY: setup-oidc
@@ -155,29 +155,14 @@ tidy: ## Sync go.mod / go.sum
 ci: lint test ## Lint + tests + binary build (GitHub Actions also runs docker build)
 	go build -o /tmp/personal-document-extractor-api ./cmd/api
 	go build -o /tmp/personal-document-extractor-migrate ./cmd/migrate
-	go build -o /tmp/personal-document-extractor-apikey ./cmd/apikey
 
 .PHONY: run
-run: check-env ## Run API on the host (needs local Go, Postgres, Redis, poppler)
+run: check-env ## Run API on the host (needs local Go, Postgres, Redis, poppler, OIDC_*)
 	go run ./cmd/api
 
 .PHONY: migrate-local
 migrate-local: ## Apply migrations with local Go (uses DATABASE_URL from .env)
 	go run ./cmd/migrate
-
-.PHONY: apikey
-apikey: ## Create an API key: make apikey NAME=local SCOPES=extract:write
-	@set -a; \
-	if [ -f .env ]; then . ./.env; fi; \
-	set +a; \
-	go run ./cmd/apikey -name "$(or $(NAME),local)" -scopes "$(or $(SCOPES),extract:write)"
-
-.PHONY: admin
-admin: ## Create an admin API key (scope=admin): make admin NAME=admin
-	@set -a; \
-	if [ -f .env ]; then . ./.env; fi; \
-	set +a; \
-	go run ./cmd/apikey -admin -name "$(or $(NAME),admin)"
 
 .PHONY: health
 health: ## Curl /health
@@ -188,27 +173,19 @@ ready: ## Curl /ready
 	@curl -sS "http://localhost:$(APP_PORT)/ready"; echo
 
 .PHONY: me
-me: ## GET /v1/me (requires API_KEY=pde_live_… or TOKEN=jwt)
-	@if [ -n "$(TOKEN)" ]; then \
-		curl -sS "http://localhost:$(APP_PORT)/v1/me" -H "Authorization: Bearer $(TOKEN)"; echo; \
-	elif [ -n "$(API_KEY)" ]; then \
-		curl -sS "http://localhost:$(APP_PORT)/v1/me" -H "Authorization: Bearer $(API_KEY)"; echo; \
-	else \
-		echo "Usage: make me API_KEY=pde_live_…   OR   make me TOKEN=<jwt>"; \
-		exit 1; \
-	fi
+me: ## GET /v1/me (TOKEN=jwt required)
+	@if [ -z "$(TOKEN)" ]; then echo "Usage: make me TOKEN=<jwt>"; exit 1; fi
+	@curl -sS "http://localhost:$(APP_PORT)/v1/me" -H "Authorization: Bearer $(TOKEN)"; echo
 
 .PHONY: extract
-extract: ## POST /v1/extract (API_KEY= or TOKEN= ; FILE=path [DOC_TYPE=identity_document])
-	@if { [ -z "$(API_KEY)" ] && [ -z "$(TOKEN)" ]; } || [ -z "$(FILE)" ]; then \
-		echo "Usage: make extract API_KEY=pde_live_… FILE=./doc.pdf [DOC_TYPE=identity_document]"; \
-		echo "   or: make extract TOKEN=<jwt> FILE=./doc.pdf"; \
+extract: ## POST /v1/extract (TOKEN= FILE=path [DOC_TYPE=identity_document])
+	@if [ -z "$(TOKEN)" ] || [ -z "$(FILE)" ]; then \
+		echo "Usage: make extract TOKEN=<jwt> FILE=./doc.pdf [DOC_TYPE=identity_document]"; \
 		exit 1; \
 	fi
-	@auth="$(API_KEY)"; if [ -n "$(TOKEN)" ]; then auth="$(TOKEN)"; fi; \
-	curl -sS -X POST \
+	@curl -sS -X POST \
 		"http://localhost:$(APP_PORT)/v1/extract?doc_type=$(or $(DOC_TYPE),identity_document)" \
-		-H "Authorization: Bearer $$auth" \
+		-H "Authorization: Bearer $(TOKEN)" \
 		-F "file=@$(FILE)"; echo
 
 .PHONY: auth-up
@@ -232,13 +209,24 @@ auth-jwks: ## Fetch JWKS via kalke-auth public proxy
 	@$(MAKE) -C "$(KALKE_AUTH_DIR)" jwks
 
 .PHONY: auth-token
-auth-token: ## Print demo access_token from kalke-auth (dev password grant)
+auth-token: ## Print demo human access_token from kalke-auth (password grant)
 	@test -d "$(KALKE_AUTH_DIR)" || { echo "Missing $(KALKE_AUTH_DIR)"; exit 1; }
 	@$(MAKE) -C "$(KALKE_AUTH_DIR)" -s token
 
+.PHONY: auth-m2m-token
+auth-m2m-token: ## Print M2M access_token from kalke-auth (client_credentials)
+	@test -d "$(KALKE_AUTH_DIR)" || { echo "Missing $(KALKE_AUTH_DIR)"; exit 1; }
+	@$(MAKE) -C "$(KALKE_AUTH_DIR)" -s m2m-token
+
 .PHONY: smoke-oidc
-smoke-oidc: ## JWT smoke: kalke-auth token → GET /v1/me (API must have OIDC_* + be reachable)
+smoke-oidc: ## Human JWT smoke: password token → GET /v1/me
 	@token=$$($(MAKE) -C "$(KALKE_AUTH_DIR)" -s token); \
+	curl -sS -w "\nHTTP %{http_code}\n" "http://localhost:$(APP_PORT)/v1/me" \
+		-H "Authorization: Bearer $$token"
+
+.PHONY: smoke-m2m
+smoke-m2m: ## M2M JWT smoke: client_credentials → GET /v1/me
+	@token=$$($(MAKE) -C "$(KALKE_AUTH_DIR)" -s m2m-token); \
 	curl -sS -w "\nHTTP %{http_code}\n" "http://localhost:$(APP_PORT)/v1/me" \
 		-H "Authorization: Bearer $$token"
 

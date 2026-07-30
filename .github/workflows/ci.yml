@@ -50,7 +50,6 @@ jobs:
         run: |
           go build -o /tmp/api ./cmd/api
           go build -o /tmp/migrate ./cmd/migrate
-          go build -o /tmp/apikey ./cmd/apikey
 
   docker:
     name: Docker build
