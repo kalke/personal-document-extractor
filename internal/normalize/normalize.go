@@ -9,8 +9,6 @@ import (
 
 var nonDigits = regexp.MustCompile(`\D+`)
 
-var cpfMasked = regexp.MustCompile(`(?i)\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b`)
-
 func DigitsOnly(s string) string {
 	return nonDigits.ReplaceAllString(s, "")
 }
@@ -110,15 +108,6 @@ func ValidCNPJ(s string) bool {
 		dv2 = 11 - r
 	}
 	return dv2 == d[13]
-}
-
-func FindCPF(text string) string {
-	for _, m := range cpfMasked.FindAllString(text, -1) {
-		if c := CPF(m); c != "" {
-			return c
-		}
-	}
-	return ""
 }
 
 func DateToISO(s string) *string {

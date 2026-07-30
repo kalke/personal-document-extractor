@@ -6,12 +6,13 @@ info:
     Extract structured JSON from Brazilian identity documents, address proofs,
     and invoices.
 
-    **AuthN:** `Authorization: Bearer` with an API key (`pde_live_…`) or an Auth0
-    access token (RS256). Human login (password/social/MFA) lives in Auth0; this
-    API stores a local `users` projection and owns API keys.
+    **AuthN:** `Authorization: Bearer` with an API key (`pde_live_…`) or an OIDC
+    access token (RS256). Human login (password/social/MFA) lives in an external
+    OIDC IdP (e.g. kalke-auth); this API stores a local `users` projection and
+    owns API keys.
 
     **AuthZ scopes:** `extract:write`, `keys:manage`, `admin` (implies all).
-    JWT tokens without Auth0 RBAC permissions receive default
+    JWT tokens without IdP `permissions` receive default
     `extract:write` + `keys:manage`.
 
     **Errors:** unless noted, error bodies are `{"error":"<message>"}`.
@@ -361,9 +362,9 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: "API key (pde_live_…) or Auth0 JWT"
+      bearerFormat: "API key (pde_live_…) or OIDC JWT"
       description: |
-        Pass either a hashed API key secret or an Auth0 access token.
+        Pass either a hashed API key secret or an OIDC access token.
         Middleware errors when missing/invalid:
         - `missing or invalid authorization`
         - `unauthorized`
@@ -481,7 +482,7 @@ components:
           format: uuid
         auth_subject:
           type: string
-          description: Auth0 `sub` or `system:ops` / similar
+          description: OIDC `sub` or `system:ops` / similar
         email:
           type: string
         email_verified:

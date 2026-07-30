@@ -46,7 +46,7 @@ func (l *Limiter) Allow(ctx context.Context, kind, principalID string) (Result, 
 	key := fmt.Sprintf("rl:%s:%s:%d", kind, principalID, window)
 	n, err := l.rdb.Incr(ctx, key).Result()
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if n == 1 {
 		_ = l.rdb.Expire(ctx, key, 2*time.Minute).Err()

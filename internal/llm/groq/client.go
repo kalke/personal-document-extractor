@@ -18,6 +18,7 @@ type Client struct {
 	model   string
 	baseURL string
 	http    *http.Client
+	wait    func(ctx context.Context, d time.Duration) error
 }
 
 func New(apiKey, model, baseURL string) *Client {
@@ -28,6 +29,18 @@ func New(apiKey, model, baseURL string) *Client {
 		http: &http.Client{
 			Timeout: 120 * time.Second,
 		},
+		wait: sleepContext,
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -93,10 +106,8 @@ func (c *Client) Chat(ctx context.Context, system string, user any, jsonMode boo
 		}
 		wait := time.Duration(attempt*3) * time.Second
 		slog.Warn("groq rate limited; retrying", "attempt", attempt, "wait", wait.String(), "err", err)
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(wait):
+		if err := c.wait(ctx, wait); err != nil {
+			return "", err
 		}
 	}
 	return "", lastErr

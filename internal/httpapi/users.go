@@ -27,9 +27,8 @@ type meResponse struct {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	p, ok := auth.PrincipalFromContext(r.Context())
-	if !ok || p.UserID == "" {
-		writeErr(w, http.StatusUnauthorized, "unauthorized")
+	p, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	if s.users == nil {
@@ -78,9 +77,8 @@ type createAPIKeyResponse struct {
 }
 
 func (s *Server) listAPIKeys(w http.ResponseWriter, r *http.Request) {
-	p, ok := auth.PrincipalFromContext(r.Context())
-	if !ok || p.UserID == "" {
-		writeErr(w, http.StatusUnauthorized, "unauthorized")
+	p, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	keys, err := s.apiKeys.ListByUser(r.Context(), p.UserID)
@@ -96,14 +94,14 @@ func (s *Server) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := auth.PrincipalFromContext(r.Context())
-	if !ok || p.UserID == "" {
-		writeErr(w, http.StatusUnauthorized, "unauthorized")
+	p, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createAPIKeyRequest
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeErr(w, http.StatusBadRequest, "invalid json body")
 		return
@@ -158,9 +156,8 @@ func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) revokeAPIKey(w http.ResponseWriter, r *http.Request) {
-	p, ok := auth.PrincipalFromContext(r.Context())
-	if !ok || p.UserID == "" {
-		writeErr(w, http.StatusUnauthorized, "unauthorized")
+	p, ok := requireUser(w, r)
+	if !ok {
 		return
 	}
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
@@ -177,6 +174,15 @@ func (s *Server) revokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func requireUser(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {
+	p, ok := auth.PrincipalFromContext(r.Context())
+	if !ok || p.UserID == "" {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return auth.Principal{}, false
+	}
+	return p, true
 }
 
 func toAPIKeyResponse(k store.APIKeyPublic) apiKeyResponse {

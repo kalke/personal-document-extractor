@@ -3,8 +3,10 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,7 +16,6 @@ import (
 
 var (
 	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
 )
 
 type APIKeyRecord struct {
@@ -59,7 +60,7 @@ type Authenticator struct {
 type Options struct {
 	Keys     APIKeyLookup
 	Users    UserSync // optional; when set, JWT auth upserts local users
-	Domain   string   // Auth0 domain, e.g. tenant.auth0.com
+	Issuer   string   // OIDC issuer URL, e.g. http://localhost:8443/realms/kalke
 	Audience string
 }
 
@@ -68,26 +69,61 @@ func NewAuthenticator(opts Options) (*Authenticator, error) {
 		return nil, fmt.Errorf("api key lookup is required")
 	}
 	a := &Authenticator{keys: opts.Keys, users: opts.Users}
-	domain := strings.TrimSpace(opts.Domain)
+	issuer := strings.TrimSpace(opts.Issuer)
 	audience := strings.TrimSpace(opts.Audience)
-	if domain == "" && audience == "" {
+	if issuer == "" && audience == "" {
 		return a, nil
 	}
-	if domain == "" || audience == "" {
-		return nil, fmt.Errorf("AUTH0_DOMAIN and AUTH0_AUDIENCE must both be set or both empty")
+	if issuer == "" || audience == "" {
+		return nil, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE must both be set or both empty")
 	}
-	domain = strings.TrimPrefix(domain, "https://")
-	domain = strings.TrimSuffix(domain, "/")
-	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", domain)
+	issuer = strings.TrimSuffix(issuer, "/")
+	jwksURL, discoveredIssuer, err := discoverJWKS(issuer)
+	if err != nil {
+		return nil, err
+	}
+	if discoveredIssuer != "" {
+		issuer = strings.TrimSuffix(discoveredIssuer, "/")
+	}
 	k, err := keyfunc.NewDefault([]string{jwksURL})
 	if err != nil {
 		return nil, fmt.Errorf("jwks: %w", err)
 	}
 	a.jwtEnabled = true
 	a.audience = audience
-	a.issuer = "https://" + domain + "/"
+	a.issuer = issuer
 	a.jwks = k
 	return a, nil
+}
+
+type oidcDiscovery struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri"`
+}
+
+func discoverJWKS(issuer string) (jwksURL, discoveredIssuer string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, issuer+"/.well-known/openid-configuration", nil)
+	if err != nil {
+		return "", "", fmt.Errorf("oidc discovery: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("oidc discovery: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("oidc discovery: unexpected status %d", resp.StatusCode)
+	}
+	var doc oidcDiscovery
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return "", "", fmt.Errorf("oidc discovery: %w", err)
+	}
+	if doc.JWKSURI == "" {
+		return "", "", fmt.Errorf("oidc discovery: missing jwks_uri")
+	}
+	return doc.JWKSURI, doc.Issuer, nil
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (Principal, error) {
@@ -137,7 +173,7 @@ func (a *Authenticator) authenticateAPIKey(ctx context.Context, plaintext string
 	}, nil
 }
 
-type auth0Claims struct {
+type oidcClaims struct {
 	Permissions   []string `json:"permissions"`
 	Scope         string   `json:"scope"`
 	Email         string   `json:"email"`
@@ -147,7 +183,7 @@ type auth0Claims struct {
 }
 
 func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (Principal, error) {
-	claims := &auth0Claims{}
+	claims := &oidcClaims{}
 	parsed, err := jwt.ParseWithClaims(tokenStr, claims, a.jwks.Keyfunc,
 		jwt.WithAudience(a.audience),
 		jwt.WithIssuer(a.issuer),
@@ -156,14 +192,7 @@ func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (P
 	if err != nil || !parsed.Valid {
 		return Principal{}, ErrUnauthorized
 	}
-	scopes := claims.Permissions
-	if len(scopes) == 0 && claims.Scope != "" {
-		scopes = strings.Fields(claims.Scope)
-	}
-	// When Auth0 RBAC permissions are not configured yet, grant self-service defaults.
-	if len(scopes) == 0 {
-		scopes = []string{ScopeExtractWrite, ScopeKeysManage}
-	}
+	scopes := scopesFromClaims(claims.Permissions, claims.Scope)
 	sub := claims.Subject
 	if sub == "" {
 		return Principal{}, ErrUnauthorized
@@ -186,4 +215,16 @@ func (a *Authenticator) authenticateJWT(ctx context.Context, tokenStr string) (P
 		p.UserID = userID
 	}
 	return p, nil
+}
+
+// scopesFromClaims prefers the permissions claim, then space-separated scope.
+// When neither is present, grants self-service defaults (bootstrap without IdP RBAC).
+func scopesFromClaims(permissions []string, scope string) []string {
+	if len(permissions) > 0 {
+		return append([]string(nil), permissions...)
+	}
+	if scope != "" {
+		return strings.Fields(scope)
+	}
+	return []string{ScopeExtractWrite, ScopeKeysManage}
 }

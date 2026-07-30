@@ -22,8 +22,8 @@ type Config struct {
 	RedisDB            int
 	RedisCacheTTL      time.Duration
 	TrustedProxies     []*net.IPNet
-	Auth0Domain        string
-	Auth0Audience      string
+	OIDCIssuer         string
+	OIDCAudience       string
 	RateLimitPerMinute int
 }
 
@@ -57,10 +57,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	auth0Domain := strings.TrimSpace(os.Getenv("AUTH0_DOMAIN"))
-	auth0Audience := strings.TrimSpace(os.Getenv("AUTH0_AUDIENCE"))
-	if (auth0Domain == "") != (auth0Audience == "") {
-		return Config{}, fmt.Errorf("AUTH0_DOMAIN and AUTH0_AUDIENCE must both be set or both empty")
+	oidcIssuer := strings.TrimSpace(os.Getenv("OIDC_ISSUER"))
+	oidcAudience := strings.TrimSpace(os.Getenv("OIDC_AUDIENCE"))
+	if (oidcIssuer == "") != (oidcAudience == "") {
+		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE must both be set or both empty")
 	}
 
 	cfg := Config{
@@ -76,8 +76,8 @@ func Load() (Config, error) {
 		RedisDB:            redisDB,
 		RedisCacheTTL:      ttl,
 		TrustedProxies:     trusted,
-		Auth0Domain:        auth0Domain,
-		Auth0Audience:      auth0Audience,
+		OIDCIssuer:         oidcIssuer,
+		OIDCAudience:       oidcAudience,
 		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {

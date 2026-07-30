@@ -13,6 +13,9 @@ type Directory struct {
 }
 
 func (d Directory) UpsertFromAuth(ctx context.Context, in auth.UserSyncInput) (string, error) {
+	if d.Users == nil {
+		return "", auth.ErrUnauthorized
+	}
 	u, err := d.Users.UpsertBySubject(ctx, store.UpsertUserInput{
 		AuthSubject:   in.Subject,
 		Email:         in.Email,
@@ -29,6 +32,9 @@ func (d Directory) UpsertFromAuth(ctx context.Context, in auth.UserSyncInput) (s
 }
 
 func (d Directory) EnsureActive(ctx context.Context, userID string) error {
+	if d.Users == nil {
+		return auth.ErrUnauthorized
+	}
 	u, err := d.Users.GetByID(ctx, userID)
 	if err != nil {
 		return auth.ErrUnauthorized

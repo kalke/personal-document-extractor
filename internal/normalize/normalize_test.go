@@ -20,13 +20,6 @@ func TestCPF(t *testing.T) {
 	}
 }
 
-func TestFindCPF(t *testing.T) {
-	text := "NOME FULANO CPF 529.982.247-25 REGISTRO 12345678901"
-	if got := FindCPF(text); got != "52998224725" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestDateToISO(t *testing.T) {
 	cases := map[string]*string{
 		"15/01/1990":           strPtr("1990-01-15"),

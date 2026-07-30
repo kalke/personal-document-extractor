@@ -26,7 +26,7 @@ func TestUsersUpsertIdempotentIntegration(t *testing.T) {
 
 	users := store.NewUsers(pool)
 	u1, err := users.UpsertBySubject(ctx, store.UpsertUserInput{
-		AuthSubject:   "auth0|upsert-test",
+		AuthSubject:   "oidc|upsert-test",
 		Email:         "a@example.com",
 		EmailVerified: true,
 		DisplayName:   "A",
@@ -35,7 +35,7 @@ func TestUsersUpsertIdempotentIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	u2, err := users.UpsertBySubject(ctx, store.UpsertUserInput{
-		AuthSubject:   "auth0|upsert-test",
+		AuthSubject:   "oidc|upsert-test",
 		Email:         "b@example.com",
 		EmailVerified: true,
 		DisplayName:   "B",

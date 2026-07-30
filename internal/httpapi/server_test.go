@@ -82,7 +82,7 @@ func defaultTestUsers() *memoryUsers {
 	return &memoryUsers{byID: map[string]store.User{
 		testUserID: {
 			ID:          testUserID,
-			AuthSubject: "auth0|test",
+			AuthSubject: "oidc|test",
 			Email:       "test@example.com",
 			Status:      "active",
 		},
@@ -257,7 +257,7 @@ func TestMeAndAPIKeys(t *testing.T) {
 		APIKeys:   keys,
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			testBearer: {
-				Subject: "auth0|test",
+				Subject: "oidc|test",
 				Kind:    auth.KindJWT,
 				UserID:  testUserID,
 				Scopes:  []string{auth.ScopeExtractWrite, auth.ScopeKeysManage},
@@ -313,7 +313,7 @@ func TestCreateAPIKeyForbidsAdminScope(t *testing.T) {
 		Extractor: &stubExtractor{},
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			testBearer: {
-				Subject: "auth0|test",
+				Subject: "oidc|test",
 				Kind:    auth.KindJWT,
 				UserID:  testUserID,
 				Scopes:  []string{auth.ScopeKeysManage},

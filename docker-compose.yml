@@ -46,8 +46,10 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       REDIS_CACHE_TTL: ${REDIS_CACHE_TTL:-24h}
-      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      # OIDC works when the issuer is reachable from this container AND matches token `iss`.
+      # Local JWT smoke: prefer host `make run` with OIDC_* (see docs/COMO-FUNCIONA.md).
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
 

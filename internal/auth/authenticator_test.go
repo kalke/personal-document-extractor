@@ -76,9 +76,9 @@ func TestAuthenticatorRejectsRevokedAndExpired(t *testing.T) {
 	}
 }
 
-func TestAuthenticatorAuth0PairRequired(t *testing.T) {
-	_, err := auth.NewAuthenticator(auth.Options{Keys: &memKeys{}, Domain: "x.auth0.com"})
+func TestAuthenticatorOIDCPairRequired(t *testing.T) {
+	_, err := auth.NewAuthenticator(auth.Options{Keys: &memKeys{}, Issuer: "http://localhost:8443/realms/kalke"})
 	if err == nil {
-		t.Fatal("expected error when only domain set")
+		t.Fatal("expected error when only issuer set")
 	}
 }

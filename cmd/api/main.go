@@ -74,8 +74,8 @@ func main() {
 	authenticator, err := auth.NewAuthenticator(auth.Options{
 		Keys:     apiKeys,
 		Users:    identity.Directory{Users: users},
-		Domain:   cfg.Auth0Domain,
-		Audience: cfg.Auth0Audience,
+		Issuer:   cfg.OIDCIssuer,
+		Audience: cfg.OIDCAudience,
 	})
 	if err != nil {
 		slog.Error("auth", "err", err)
