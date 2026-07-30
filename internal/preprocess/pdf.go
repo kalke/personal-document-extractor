@@ -8,7 +8,10 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-func TextFromPDF(data []byte) (string, error) {
+func TextFromPDF(data []byte, maxPages int) (string, error) {
+	if maxPages <= 0 {
+		maxPages = defaultMaxPages
+	}
 	reader, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", fmt.Errorf("open pdf: %w", err)
@@ -17,6 +20,9 @@ func TextFromPDF(data []byte) (string, error) {
 	total := reader.NumPage()
 	if total == 0 {
 		return "", fmt.Errorf("pdf has no pages")
+	}
+	if total > maxPages {
+		total = maxPages
 	}
 
 	var b strings.Builder

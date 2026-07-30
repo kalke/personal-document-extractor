@@ -1,6 +1,7 @@
 package preprocess
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,7 @@ const (
 	defaultMaxPages = 3
 )
 
-func PDFPagesToPNG(data []byte, maxPages int) ([][]byte, error) {
+func PDFPagesToJPEG(ctx context.Context, data []byte, maxPages int) ([][]byte, error) {
 	if maxPages <= 0 {
 		maxPages = defaultMaxPages
 	}
@@ -26,7 +27,7 @@ func PDFPagesToPNG(data []byte, maxPages int) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	in := filepath.Join(dir, "input.pdf")
 	if err := os.WriteFile(in, data, 0o600); err != nil {
@@ -34,7 +35,8 @@ func PDFPagesToPNG(data []byte, maxPages int) ([][]byte, error) {
 	}
 
 	prefix := filepath.Join(dir, "page")
-	cmd := exec.Command(
+	cmd := exec.CommandContext(
+		ctx,
 		"pdftoppm",
 		"-jpeg",
 		"-jpegopt", "quality=75",

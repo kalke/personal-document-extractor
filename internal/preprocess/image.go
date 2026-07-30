@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 const (

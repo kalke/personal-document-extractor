@@ -33,7 +33,7 @@ var extensionKind = map[string]Kind{
 	".webp": KindImage,
 }
 
-func ValidateUpload(filename, _ string, data []byte) (Kind, string, error) {
+func ValidateUpload(filename string, data []byte) (Kind, string, error) {
 	if len(data) == 0 {
 		return KindOther, "", ErrEmptyUpload
 	}
@@ -42,6 +42,9 @@ func ValidateUpload(filename, _ string, data []byte) (Kind, string, error) {
 	}
 
 	sniffed := canonicalizeMIME(http.DetectContentType(data))
+	if sniffed == "application/octet-stream" {
+		sniffed = sniffImageMIME(data)
+	}
 	kind, ok := allowedMIME[sniffed]
 	if !ok {
 		slog.Warn("upload rejected",
@@ -65,6 +68,13 @@ func ValidateUpload(filename, _ string, data []byte) (Kind, string, error) {
 	}
 
 	return kind, sniffed, nil
+}
+
+func sniffImageMIME(data []byte) string {
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+	return "application/octet-stream"
 }
 
 func canonicalizeMIME(mime string) string {
