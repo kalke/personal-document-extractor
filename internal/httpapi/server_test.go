@@ -187,12 +187,15 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("miss status %d body %s", rec.Code, rec.Body.String())
 	}
-	var miss extract.Result
+	var miss map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &miss); err != nil {
 		t.Fatal(err)
 	}
-	if miss.Meta.Cache != "miss" || miss.Meta.ContentSHA256 == "" {
-		t.Fatalf("miss meta: %+v", miss.Meta)
+	if miss["doc_type"] != "identity_document" {
+		t.Fatalf("miss body: %v", miss)
+	}
+	if _, ok := miss["meta"]; ok {
+		t.Fatalf("meta must not be exposed: %v", miss)
 	}
 	if ex.callCount() != 1 || st.len() != 1 {
 		t.Fatalf("calls=%d rows=%d", ex.callCount(), st.len())
@@ -203,12 +206,12 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("hit status %d", rec.Code)
 	}
-	var hit extract.Result
+	var hit map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &hit); err != nil {
 		t.Fatal(err)
 	}
-	if hit.Meta.Cache != "hit" {
-		t.Fatalf("expected hit, got %+v", hit.Meta)
+	if _, ok := hit["meta"]; ok {
+		t.Fatalf("meta must not be exposed on hit: %v", hit)
 	}
 	if ex.callCount() != 1 || st.len() != 1 {
 		t.Fatalf("cache hit should not extract/persist again; calls=%d rows=%d", ex.callCount(), st.len())
@@ -285,12 +288,12 @@ func TestExtractRefreshBypassesCacheAndReplaces(t *testing.T) {
 	if st.len() != 2 || st.replaceCount() != 1 {
 		t.Fatalf("rows=%d replaced=%d", st.len(), st.replaceCount())
 	}
-	var body extract.Result
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Meta.Cache != "miss" {
-		t.Fatalf("refresh should report miss, got %q", body.Meta.Cache)
+	if _, ok := body["meta"]; ok {
+		t.Fatalf("meta must not be exposed: %v", body)
 	}
 }
 

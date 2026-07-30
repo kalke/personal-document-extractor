@@ -139,10 +139,8 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	if !refresh {
 		if cached, ok := s.lookupCache(r.Context(), docType, shaHex); ok {
-			cached.Meta.ContentSHA256 = shaHex
-			cached.Meta.Cache = "hit"
 			log.Info("extract", "cache", "hit")
-			writeJSON(w, http.StatusOK, cached)
+			writeJSON(w, http.StatusOK, toExtractResponse(cached))
 			return
 		}
 	} else {
@@ -171,7 +169,7 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		log:      log,
 	})
 	log.Info("extract", "cache", "miss", "mode", result.Meta.Mode, "images", result.Meta.Images)
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, toExtractResponse(result))
 }
 
 type persistArgs struct {
