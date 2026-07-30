@@ -21,6 +21,7 @@ func main() {
 	fs := flag.NewFlagSet("apikey", flag.ExitOnError)
 	name := fs.String("name", "local", "human-readable key name")
 	scopes := fs.String("scopes", auth.ScopeExtractWrite, "comma-separated scopes")
+	admin := fs.Bool("admin", false, "create a key with the admin scope (implies all permissions)")
 	_ = fs.Parse(os.Args[1:])
 
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -29,7 +30,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	parsedScopes, err := auth.ParseScopesCSV(*scopes)
+	scopeCSV := *scopes
+	if *admin {
+		scopeCSV = auth.ScopeAdmin
+		if strings.TrimSpace(*name) == "local" {
+			*name = "admin"
+		}
+	}
+	parsedScopes, err := auth.ParseScopesCSV(scopeCSV)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "scopes: %v\n", err)
 		os.Exit(1)

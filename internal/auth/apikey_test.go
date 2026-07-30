@@ -35,4 +35,8 @@ func TestParseScopesCSV(t *testing.T) {
 	if _, err := auth.ParseScopesCSV("nope"); err == nil {
 		t.Fatal("expected error")
 	}
+	scopes, err = auth.ParseScopesCSV(auth.ScopeAdmin)
+	if err != nil || len(scopes) != 1 || scopes[0] != auth.ScopeAdmin {
+		t.Fatalf("admin: %v %v", scopes, err)
+	}
 }

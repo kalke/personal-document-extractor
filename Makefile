@@ -141,6 +141,13 @@ apikey: ## Create an API key: make apikey NAME=local SCOPES=extract:write
 	set +a; \
 	go run ./cmd/apikey -name "$(or $(NAME),local)" -scopes "$(or $(SCOPES),extract:write)"
 
+.PHONY: admin
+admin: ## Create an admin API key (scope=admin): make admin NAME=admin
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
+	go run ./cmd/apikey -admin -name "$(or $(NAME),admin)"
+
 .PHONY: health
 health: ## Curl /health
 	@curl -sS "http://localhost:$(APP_PORT)/health"; echo

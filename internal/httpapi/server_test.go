@@ -181,6 +181,31 @@ func TestExtractForbiddenScope(t *testing.T) {
 	}
 }
 
+func TestExtractAdminScopeAllowed(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{
+			result: extract.Result{
+				DocType: "identity_document",
+				Data:    map[string]any{"nome": "ADMIN"},
+				Meta:    extract.Meta{Mode: "vision"},
+			},
+		},
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {
+				Subject:  "api_key:admin",
+				Kind:     auth.KindAPIKey,
+				APIKeyID: "00000000-0000-0000-0000-000000000099",
+				Scopes:   []string{auth.ScopeAdmin},
+			},
+		}},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 type countingLimiter struct {
 	limit int
 	n     int

@@ -19,7 +19,8 @@ make setup                 # creates .env from .env.example
 
 make up                    # build + start api, postgres, redis
 make ready                 # wait until DB is up: {"status":"ready",...}
-make apikey NAME=local     # create API key (secret printed once)
+make apikey NAME=local     # create extract:write API key (secret once)
+make admin                 # create admin API key (scope=admin; secret once)
 ```
 
 API listens on `http://localhost:8080`. `/v1/extract` requires `Authorization: Bearer <api-key-or-jwt>`.
@@ -48,6 +49,7 @@ make destroy               # stop and delete volumes
 | `make migrate` | Apply goose migrations **in Docker** |
 | `make migrations NAME=…` | Create a new SQL migration file |
 | `make apikey NAME=…` | Create a hashed API key (`SCOPES=` optional) |
+| `make admin` | Create an admin API key (`NAME=` optional, default `admin`) |
 | `make health` / `make ready` | Hit `/health` and `/ready` |
 | `make lint` | golangci-lint (same as CI) |
 | `make test` | Unit + integration tests (no Docker) |
@@ -128,7 +130,7 @@ make ready
 | `keys:manage` | Reserved for future key admin HTTP API |
 | `admin` | All scopes |
 
-API keys are stored as **SHA-256 hashes** with a public prefix for lookup; the secret is shown once by `make apikey`. Auth0 is optional: set both `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` to accept RS256 JWTs (issuer `https://{domain}/`, permissions from the Auth0 RBAC `permissions` claim or space-delimited `scope`). `/health` and `/ready` stay public.
+API keys are stored as **SHA-256 hashes** with a public prefix for lookup; the secret is shown once by `make apikey` or `make admin`. Auth0 is optional: set both `AUTH0_DOMAIN` and `AUTH0_AUDIENCE` to accept RS256 JWTs (issuer `https://{domain}/`, permissions from the Auth0 RBAC `permissions` claim or space-delimited `scope`). `/health` and `/ready` stay public.
 
 ### Rate limiting
 
