@@ -1,21 +1,29 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 
+	"github.com/kalke/personal-document-extractor/internal/cache"
 	"github.com/kalke/personal-document-extractor/internal/config"
+	"github.com/kalke/personal-document-extractor/internal/db"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/address_proof"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/identity_document"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/invoice_nf"
 	"github.com/kalke/personal-document-extractor/internal/extract"
 	"github.com/kalke/personal-document-extractor/internal/httpapi"
 	"github.com/kalke/personal-document-extractor/internal/llm/groq"
+	"github.com/kalke/personal-document-extractor/internal/migrate"
+	"github.com/kalke/personal-document-extractor/internal/store"
 )
 
 func main() {
@@ -28,6 +36,28 @@ func main() {
 	}
 	setupLogger(cfg.LogLevel, cfg.LogFormat)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := migrate.Up(ctx, cfg.DatabaseURL); err != nil {
+		slog.Error("migrate", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("migrations applied")
+
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("database", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	redisCache := cache.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.RedisCacheTTL)
+	defer func() { _ = redisCache.Close() }()
+	if err := redisCache.Ping(ctx); err != nil {
+		slog.Warn("redis unavailable at startup; cache will fail open", "err", err)
+	}
+
 	llm := groq.New(cfg.GroqAPIKey, cfg.GroqModel, cfg.GroqBaseURL)
 	svc := extract.NewService(
 		llm,
@@ -36,21 +66,51 @@ func main() {
 		invoice_nf.DocType{},
 	)
 
+	handler, err := httpapi.New(httpapi.Deps{
+		Extractor:   svc,
+		Pool:        pool,
+		Cache:       redisCache,
+		Extractions: store.NewExtractions(pool),
+	})
+	if err != nil {
+		slog.Error("httpapi", "err", err)
+		os.Exit(1)
+	}
+
 	addr := ":" + cfg.Port
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           httpapi.New(svc),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      130 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	slog.Info("server starting", "addr", addr, "model", cfg.GroqModel)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		slog.Error("server stopped", "err", err)
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("server starting", "addr", addr, "model", cfg.GroqModel)
+		errCh <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("shutdown signal received")
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server stopped", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("shutdown", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("server stopped")
 }
 
 func setupLogger(level, format string) {
