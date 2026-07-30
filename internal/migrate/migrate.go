@@ -50,7 +50,7 @@ func Up(ctx context.Context, databaseURL string) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpContext(ctx, db, "."); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
