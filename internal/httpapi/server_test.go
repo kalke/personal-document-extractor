@@ -54,6 +54,8 @@ func defaultTestAuth() *stubAuth {
 		principals: map[string]auth.Principal{
 			testBearer: {
 				Subject: "oidc|test",
+				Client:  "kalke-cli",
+				Email:   "test@example.com",
 				Kind:    auth.KindJWT,
 				Scopes:  []string{auth.ScopeExtractWrite},
 			},
@@ -361,6 +363,9 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	}
 	if st.rows[0].AuthSubject == "" {
 		t.Fatalf("expected auth_subject persisted: %+v", st.rows[0])
+	}
+	if st.rows[0].AuthClient != "kalke-cli" || st.rows[0].AuthEmail != "test@example.com" {
+		t.Fatalf("expected auth_client/email persisted: %+v", st.rows[0])
 	}
 
 	rec = httptest.NewRecorder()

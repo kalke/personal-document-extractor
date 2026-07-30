@@ -95,6 +95,8 @@ func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (P
 type oidcClaims struct {
 	Permissions []string `json:"permissions"`
 	Scope       string   `json:"scope"`
+	Email       string   `json:"email"`
+	Azp         string   `json:"azp"`
 	jwt.RegisteredClaims
 }
 
@@ -114,6 +116,8 @@ func (a *Authenticator) authenticateJWT(tokenStr string) (Principal, error) {
 	}
 	return Principal{
 		Subject: sub,
+		Client:  strings.TrimSpace(claims.Azp),
+		Email:   strings.TrimSpace(claims.Email),
 		Kind:    KindJWT,
 		Scopes:  scopesFromClaims(claims.Permissions, claims.Scope),
 	}, nil

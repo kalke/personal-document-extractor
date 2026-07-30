@@ -31,6 +31,8 @@ type ExtractionRecord struct {
 	ClientIP      string
 	UserAgent     string
 	AuthSubject   string
+	AuthClient    string
+	AuthEmail     string
 	Status        string
 	Result        extract.Result
 	Duration      time.Duration
@@ -42,6 +44,13 @@ func (s *Extractions) Insert(ctx context.Context, rec ExtractionRecord) error {
 
 func (s *Extractions) Replace(ctx context.Context, rec ExtractionRecord) error {
 	return s.persist(ctx, rec, true)
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace bool) error {
@@ -71,17 +80,12 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 		}
 	}
 
-	var authSubject any
-	if rec.AuthSubject != "" {
-		authSubject = rec.AuthSubject
-	}
-
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO extractions (
 			doc_type, content_sha256, filename, mime, mode, model,
-			request_id, client_ip, user_agent, auth_subject,
+			request_id, client_ip, user_agent, auth_subject, auth_client, auth_email,
 			status, result_json, duration_ms
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 	`,
 		rec.DocType,
 		rec.ContentSHA256,
@@ -92,7 +96,9 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 		rec.RequestID,
 		rec.ClientIP,
 		rec.UserAgent,
-		authSubject,
+		nullIfEmpty(rec.AuthSubject),
+		nullIfEmpty(rec.AuthClient),
+		nullIfEmpty(rec.AuthEmail),
 		rec.Status,
 		payload,
 		int(rec.Duration.Milliseconds()),

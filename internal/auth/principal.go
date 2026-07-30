@@ -12,7 +12,9 @@ const (
 )
 
 type Principal struct {
-	Subject string
+	Subject string // OIDC sub (Keycloak user/service-account UUID)
+	Client  string // OIDC azp (OAuth client id, e.g. pde-m2m / kalke-cli)
+	Email   string // OIDC email when present (humans); empty for typical M2M
 	Kind    Kind
 	Scopes  []string
 }

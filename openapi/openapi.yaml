@@ -9,7 +9,8 @@ info:
     **AuthN:** `Authorization: Bearer` with an OIDC access token (RS256) from
     an external IdP (e.g. kalke-auth / Keycloak). Humans use password/PKCE;
     machines use client_credentials. This API is a pure resource server: no
-    local `users` table — audit via JWT `sub` on extractions (`auth_subject`).
+    local `users` table — audit via JWT `sub` (`auth_subject`), OAuth client
+    id `azp` (`auth_client`), and `email` when present (`auth_email`).
 
     **AuthZ scopes:** `extract:write`, `admin` (implies all).
     JWT tokens without IdP `permissions` receive default `extract:write`.

@@ -167,7 +167,7 @@ make ready
 **Human:** password (dev `kalke-cli`) or Authorization Code + PKCE (`kalke-spa`).  
 **M2M:** Keycloak `client_credentials` (`pde-m2m`) — no proprietary product API keys.
 
-Identity lives in the IdP. This API does **not** keep a local `users` table; successful extracts store the JWT `sub` as `auth_subject` for audit.
+Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`, e.g. `pde-m2m` / `kalke-cli`), and `auth_email` when the token includes it (humans).
 
 `OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` defaults to `extract:write`. `/health` and `/ready` stay public.
 
@@ -244,7 +244,7 @@ Body shape for failures: `{"error":"…"}`. Full status/message catalog: [`opena
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
 - **Request origin:** on persist, store `client_ip` (trusted-proxy aware) and `user_agent` in Postgres only — never returned in the API response
-- **Principal:** on persist, store `auth_subject` / `user_id` for audit
+- **Principal:** on persist, store `auth_subject`, `auth_client` (`azp`), and `auth_email` when present
 
 ## Configuration
 

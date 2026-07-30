@@ -39,6 +39,8 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		ClientIP:      "203.0.113.9",
 		UserAgent:     "integration-test",
 		AuthSubject:   "oidc|extraction-integration",
+		AuthClient:    "pde-m2m",
+		AuthEmail:     "",
 		Status:        "success",
 		Result: extract.Result{
 			DocType: "identity_document",
@@ -64,14 +66,15 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		t.Fatalf("active rows=%d want 1", active)
 	}
 
-	var clientIP, subject string
+	var clientIP, subject, client, email string
 	if err := pool.QueryRow(ctx, `
-		SELECT client_ip, auth_subject FROM extractions
+		SELECT client_ip, auth_subject, COALESCE(auth_client, ''), COALESCE(auth_email, '')
+		FROM extractions
 		WHERE content_sha256 = $1 AND deleted_at IS NULL
-	`, sha).Scan(&clientIP, &subject); err != nil {
+	`, sha).Scan(&clientIP, &subject, &client, &email); err != nil {
 		t.Fatal(err)
 	}
-	if clientIP != "203.0.113.9" || subject == "" {
-		t.Fatalf("client_ip=%q subject=%q", clientIP, subject)
+	if clientIP != "203.0.113.9" || subject == "" || client != "pde-m2m" {
+		t.Fatalf("client_ip=%q subject=%q client=%q email=%q", clientIP, subject, client, email)
 	}
 }

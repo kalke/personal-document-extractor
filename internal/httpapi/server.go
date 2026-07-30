@@ -189,9 +189,11 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	result.Meta.ContentSHA256 = shaHex
 	result.Meta.Cache = "miss"
-	var authSubject string
+	var authSubject, authClient, authEmail string
 	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
 		authSubject = p.Subject
+		authClient = p.Client
+		authEmail = p.Email
 	}
 	s.persist(persistArgs{
 		reqID:       reqID,
@@ -205,6 +207,8 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		clientIP:    clientIP,
 		userAgent:   userAgent,
 		authSubject: authSubject,
+		authClient:  authClient,
+		authEmail:   authEmail,
 		log:         log,
 	})
 	log.Info("extract", "cache", "miss", "mode", result.Meta.Mode, "images", result.Meta.Images)
@@ -223,6 +227,8 @@ type persistArgs struct {
 	clientIP    string
 	userAgent   string
 	authSubject string
+	authClient  string
+	authEmail   string
 	log         *slog.Logger
 }
 
@@ -264,6 +270,8 @@ func (s *Server) persist(args persistArgs) {
 		ClientIP:      args.clientIP,
 		UserAgent:     args.userAgent,
 		AuthSubject:   args.authSubject,
+		AuthClient:    args.authClient,
+		AuthEmail:     args.authEmail,
 		Status:        "success",
 		Result:        args.result,
 		Duration:      args.duration,
