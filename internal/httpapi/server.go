@@ -250,41 +250,42 @@ func (s *Server) persist(args persistArgs) {
 	ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer cancel()
 
+	if s.extractions != nil {
+		rec := store.ExtractionRecord{
+			DocType:       args.docType,
+			ContentSHA256: args.shaHex,
+			Filename:      args.filename,
+			MIME:          args.doc.MIME,
+			Mode:          args.result.Meta.Mode,
+			Model:         args.result.Meta.Model,
+			RequestID:     args.reqID,
+			ClientIP:      args.clientIP,
+			UserAgent:     args.userAgent,
+			AuthSubject:   args.authSubject,
+			AuthClient:    args.authClient,
+			AuthEmail:     args.authEmail,
+			Status:        "success",
+			Result:        args.result,
+			Duration:      args.duration,
+		}
+
+		var err error
+		if args.refresh {
+			err = s.extractions.Replace(ctx, rec)
+		} else {
+			err = s.extractions.Insert(ctx, rec)
+		}
+		if err != nil {
+			// Do not populate Redis on DB failure — otherwise cache hits skip persist forever.
+			args.log.Error("persist extraction failed", "err", err, "refresh", args.refresh)
+			return
+		}
+	}
+
 	if s.cache != nil {
 		cached := args.result
 		cached.Meta.Cache = ""
 		s.cache.Set(ctx, args.docType, args.shaHex, cached)
-	}
-	if s.extractions == nil {
-		return
-	}
-
-	rec := store.ExtractionRecord{
-		DocType:       args.docType,
-		ContentSHA256: args.shaHex,
-		Filename:      args.filename,
-		MIME:          args.doc.MIME,
-		Mode:          args.result.Meta.Mode,
-		Model:         args.result.Meta.Model,
-		RequestID:     args.reqID,
-		ClientIP:      args.clientIP,
-		UserAgent:     args.userAgent,
-		AuthSubject:   args.authSubject,
-		AuthClient:    args.authClient,
-		AuthEmail:     args.authEmail,
-		Status:        "success",
-		Result:        args.result,
-		Duration:      args.duration,
-	}
-
-	var err error
-	if args.refresh {
-		err = s.extractions.Replace(ctx, rec)
-	} else {
-		err = s.extractions.Insert(ctx, rec)
-	}
-	if err != nil {
-		args.log.Error("persist extraction failed", "err", err, "refresh", args.refresh)
 	}
 }
 

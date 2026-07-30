@@ -239,7 +239,7 @@ Body shape for failures: `{"error":"…"}`. Full status/message catalog: [`opena
 - **Key:** `extract:v1:{doc_type}:{sha256(raw bytes)}`
 - **TTL:** `REDIS_CACHE_TTL` (default `24h`, must be `> 0`)
 - **Order:** validate/prepare upload, then cache lookup (spoofed extensions cannot skip validation)
-- **Redis fail-open:** warn and skip cache if Redis is down; corrupt cache entries are deleted
+- **Redis fail-open:** warn and skip cache if Redis is down; corrupt cache entries are deleted. Cache is written only after a successful Postgres persist (so a DB failure cannot poison Redis into permanent cache-hits with no rows).
 - **Hit:** return Redis payload only (no Postgres write)
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
