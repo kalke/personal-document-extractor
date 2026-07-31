@@ -21,3 +21,4 @@ Thumbs.db
 coverage.out
 *.test
 tmp/
+.tmp/

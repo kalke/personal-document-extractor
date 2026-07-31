@@ -84,17 +84,41 @@ destroy: ## Stop stack and delete volumes (destructive)
 	$(COMPOSE) down -v
 
 .PHONY: reset
-reset: ## Docker down + up (postgres/redis); free :8080; truncate extractions
+reset: check-env ## Docker down + up (postgres/redis); free :8080; truncate; start host API
 	@echo "Stopping listeners on :$(APP_PORT)..."
 	@-fuser -k "$(APP_PORT)/tcp" >/dev/null 2>&1 || true
+	@if [ -f .tmp/api.pid ]; then kill $$(cat .tmp/api.pid) >/dev/null 2>&1 || true; fi
 	$(COMPOSE) down
 	$(COMPOSE) up -d --wait postgres redis
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 		user=$${POSTGRES_USER:-extractor}; \
 		db=$${POSTGRES_DB:-extractor}; \
 		$(COMPOSE) exec -T postgres psql -U "$$user" -d "$$db" -c "TRUNCATE TABLE extractions;"
-	@echo "Reset OK — stack recreated, extractions truncated."
-	@echo "Start API: make run"
+	@mkdir -p bin .tmp
+	@echo "Building and starting host API on :$(APP_PORT)..."
+	@go build -o bin/api ./cmd/api
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		setsid -f ./bin/api >.tmp/api.log 2>&1; \
+		sleep 0.3; \
+		pgrep -n -x api >.tmp/api.pid || pgrep -n -f '[.]?/bin/api' >.tmp/api.pid
+	@ok=0; for i in $$(seq 1 30); do \
+		if curl -sf "http://localhost:$(APP_PORT)/health" >/dev/null 2>&1; then ok=1; break; fi; \
+		sleep 1; \
+	done; \
+	if [ "$$ok" -eq 1 ]; then \
+		echo "Reset OK — deps up, extractions truncated, API pid=$$(cat .tmp/api.pid) on :$(APP_PORT)"; \
+		echo "Logs: tail -f .tmp/api.log   | stop: kill \$$(cat .tmp/api.pid)"; \
+	else \
+		echo "API failed to become ready — see .tmp/api.log"; \
+		tail -n 40 .tmp/api.log || true; \
+		exit 1; \
+	fi
+
+.PHONY: stop-api
+stop-api: ## Stop host API started by make reset
+	@-fuser -k "$(APP_PORT)/tcp" >/dev/null 2>&1 || true
+	@if [ -f .tmp/api.pid ]; then kill $$(cat .tmp/api.pid) >/dev/null 2>&1 || true; rm -f .tmp/api.pid; fi
+	@echo "Host API stopped"
 
 .PHONY: restart
 restart: ## Restart all Compose services

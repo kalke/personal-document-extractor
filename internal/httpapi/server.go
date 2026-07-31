@@ -151,10 +151,10 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := preprocess.Prepare(filename, data)
-	if err != nil {
+	// Cheap validation (MIME/extension) before cache — do NOT rasterize PDFs yet.
+	if _, _, err := preprocess.ValidateUpload(filename, data); err != nil {
 		status, msg := mapPreprocessError(err)
-		log.Warn("preprocess failed", "err", err, "doc_type", docType, "status", status)
+		log.Warn("upload validation failed", "err", err, "doc_type", docType, "status", status)
 		writeErr(w, status, msg)
 		return
 	}
@@ -177,6 +177,14 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s.invalidateCache(r.Context(), docType, shaHex)
+	}
+
+	doc, err := preprocess.Prepare(filename, data)
+	if err != nil {
+		status, msg := mapPreprocessError(err)
+		log.Warn("preprocess failed", "err", err, "doc_type", docType, "status", status)
+		writeErr(w, status, msg)
+		return
 	}
 
 	result, err := s.extractor.Extract(r.Context(), docType, doc)
