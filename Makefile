@@ -45,7 +45,7 @@ setup-oidc: setup ## Write local OIDC_* into .env for host JWT smoke (kalke-auth
 	@mv .env.tmp .env
 	@echo "Wrote OIDC_ISSUER=$(OIDC_ISSUER_DEFAULT)"
 	@echo "Wrote OIDC_AUDIENCE=$(OIDC_AUDIENCE_DEFAULT)"
-	@echo "JWT smoke: make auth-up && make deps-up && make run   then   make smoke-oidc"
+	@echo "All-Docker: make auth-up && make up   (or make reset / make up-all)"
 
 .PHONY: check-env
 check-env: ## Fail if GROQ_API_KEY is unset in the environment or .env
@@ -58,18 +58,26 @@ check-env: ## Fail if GROQ_API_KEY is unset in the environment or .env
 	fi
 
 .PHONY: up
-up: check-env ## Build and start API + Postgres + Redis (detached)
-	$(COMPOSE) up --build -d
+up: check-env ## Build and start API + Postgres + Redis (needs kalke-auth network)
+	@docker network inspect kalke-auth >/dev/null 2>&1 || { \
+		echo "Missing Docker network kalke-auth. Start IdP first: make auth-up"; \
+		exit 1; \
+	}
+	$(COMPOSE) up --build -d --wait
 
 .PHONY: deps-up
-deps-up: ## Start only Postgres + Redis (for host `make run` / JWT smoke)
-	$(COMPOSE) up -d postgres redis
+deps-up: ## Start only Postgres + Redis
+	$(COMPOSE) up -d --wait db redis
 
 .PHONY: up-all
-up-all: auth-up up ## Start kalke-auth IdP + this API stack
+up-all: auth-up up ## Start kalke-auth IdP + this API stack (all Docker)
 
 .PHONY: up-fg
 up-fg: check-env ## Build and start stack in foreground
+	@docker network inspect kalke-auth >/dev/null 2>&1 || { \
+		echo "Missing Docker network kalke-auth. Start IdP first: make auth-up"; \
+		exit 1; \
+	}
 	$(COMPOSE) up --build
 
 .PHONY: down
@@ -84,41 +92,38 @@ destroy: ## Stop stack and delete volumes (destructive)
 	$(COMPOSE) down -v
 
 .PHONY: reset
-reset: check-env ## Docker down + up (postgres/redis); free :8080; truncate; start host API
-	@echo "Stopping listeners on :$(APP_PORT)..."
+reset: check-env ## Docker down + up (api+postgres+redis); truncate extractions
+	@echo "Stopping host listeners on :$(APP_PORT) (if any)..."
 	@-fuser -k "$(APP_PORT)/tcp" >/dev/null 2>&1 || true
-	@if [ -f .tmp/api.pid ]; then kill $$(cat .tmp/api.pid) >/dev/null 2>&1 || true; fi
+	@if [ -f .tmp/api.pid ]; then kill $$(cat .tmp/api.pid) >/dev/null 2>&1 || true; rm -f .tmp/api.pid; fi
+	@docker network inspect kalke-auth >/dev/null 2>&1 || { \
+		echo "Starting kalke-auth (creates network kalke-auth)..."; \
+		$(MAKE) auth-up; \
+	}
+	@echo "Waiting for Keycloak (Caddy :8443)..."
+	@ok=0; for i in $$(seq 1 60); do \
+		if curl -sf "http://localhost:8443/realms/kalke/.well-known/openid-configuration" >/dev/null 2>&1; then ok=1; break; fi; \
+		sleep 2; \
+	done; \
+	if [ "$$ok" -ne 1 ]; then echo "Keycloak not ready — make auth-up / auth-logs"; exit 1; fi
 	$(COMPOSE) down
-	$(COMPOSE) up -d --wait postgres redis
+	$(COMPOSE) up --build -d --wait
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 		user=$${POSTGRES_USER:-extractor}; \
 		db=$${POSTGRES_DB:-extractor}; \
-		$(COMPOSE) exec -T postgres psql -U "$$user" -d "$$db" -c "TRUNCATE TABLE extractions;"
-	@mkdir -p bin .tmp
-	@echo "Building and starting host API on :$(APP_PORT)..."
-	@go build -o bin/api ./cmd/api
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-		setsid -f ./bin/api >.tmp/api.log 2>&1; \
-		sleep 0.3; \
-		pgrep -n -x api >.tmp/api.pid || pgrep -n -f '[.]?/bin/api' >.tmp/api.pid
+		$(COMPOSE) exec -T db psql -U "$$user" -d "$$db" -c "TRUNCATE TABLE extractions;"
 	@ok=0; for i in $$(seq 1 30); do \
 		if curl -sf "http://localhost:$(APP_PORT)/health" >/dev/null 2>&1; then ok=1; break; fi; \
 		sleep 1; \
 	done; \
 	if [ "$$ok" -eq 1 ]; then \
-		echo "Reset OK — deps up, extractions truncated, API pid=$$(cat .tmp/api.pid) on :$(APP_PORT)"; \
-		echo "Logs: tail -f .tmp/api.log   | stop: kill \$$(cat .tmp/api.pid)"; \
+		echo "Reset OK — full Docker stack up (api + postgres + redis), extractions truncated."; \
+		echo "IdP: make auth-up (network kalke-auth). Logs: make logs SERVICE=api"; \
 	else \
-		echo "API failed to become ready — see .tmp/api.log"; \
-		tail -n 40 .tmp/api.log || true; \
+		echo "API failed to become ready — make logs SERVICE=api"; \
+		$(COMPOSE) logs --tail=40 api || true; \
 		exit 1; \
 	fi
-
-.PHONY: stop-api
-stop-api: ## Stop host API started by make reset
-	@-fuser -k "$(APP_PORT)/tcp" >/dev/null 2>&1 || true
-	@if [ -f .tmp/api.pid ]; then kill $$(cat .tmp/api.pid) >/dev/null 2>&1 || true; rm -f .tmp/api.pid; fi
-	@echo "Host API stopped"
 
 .PHONY: restart
 restart: ## Restart all Compose services
@@ -138,7 +143,7 @@ build: ## Build Compose images
 
 .PHONY: migrate
 migrate: ## Apply goose migrations via Docker (Postgres must be reachable)
-	$(COMPOSE) up -d postgres
+	$(COMPOSE) up -d db
 	$(COMPOSE) run --rm --no-deps --entrypoint /app/migrate api
 
 .PHONY: migrations

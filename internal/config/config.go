@@ -24,6 +24,7 @@ type Config struct {
 	TrustedProxies     []*net.IPNet
 	OIDCIssuer         string
 	OIDCAudience       string
+	OIDCDiscoveryURL   string
 	RateLimitPerMinute int
 }
 
@@ -78,6 +79,7 @@ func Load() (Config, error) {
 		TrustedProxies:     trusted,
 		OIDCIssuer:         oidcIssuer,
 		OIDCAudience:       oidcAudience,
+		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
 		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {

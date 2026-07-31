@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,8 +24,9 @@ type Authenticator struct {
 }
 
 type Options struct {
-	Issuer   string // OIDC issuer URL, e.g. http://localhost:8443/realms/kalke
-	Audience string
+	Issuer       string // Expected JWT iss (public), e.g. http://localhost:8443/realms/kalke
+	Audience     string
+	DiscoveryURL string // Optional fetch base when Issuer is not reachable (Docker → Caddy)
 }
 
 func NewAuthenticator(opts Options) (*Authenticator, error) {
@@ -34,13 +36,31 @@ func NewAuthenticator(opts Options) (*Authenticator, error) {
 		return nil, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required")
 	}
 	issuer = strings.TrimSuffix(issuer, "/")
-	jwksURL, discoveredIssuer, err := discoverJWKS(issuer)
+
+	discovery := strings.TrimSuffix(strings.TrimSpace(opts.DiscoveryURL), "/")
+	if discovery == "" {
+		discovery = issuer
+	}
+
+	jwksURL, discoveredIssuer, err := discoverJWKS(discovery)
 	if err != nil {
 		return nil, err
 	}
-	if discoveredIssuer != "" {
+	// Keep configured issuer for token validation (public iss). Only adopt
+	// discovery issuer when we discovered via the same URL as Issuer.
+	if opts.DiscoveryURL == "" && discoveredIssuer != "" {
 		issuer = strings.TrimSuffix(discoveredIssuer, "/")
 	}
+	// Keycloak often advertises jwks_uri on the public hostname (localhost);
+	// rewrite to the reachable discovery origin inside Docker.
+	if opts.DiscoveryURL != "" {
+		rewritten, rewriteErr := rewriteURLOrigin(jwksURL, discovery)
+		if rewriteErr != nil {
+			return nil, fmt.Errorf("jwks url: %w", rewriteErr)
+		}
+		jwksURL = rewritten
+	}
+
 	k, err := keyfunc.NewDefault([]string{jwksURL})
 	if err != nil {
 		return nil, fmt.Errorf("jwks: %w", err)
@@ -58,10 +78,10 @@ type oidcDiscovery struct {
 	JWKSURI string `json:"jwks_uri"`
 }
 
-func discoverJWKS(issuer string) (jwksURL, discoveredIssuer string, err error) {
+func discoverJWKS(base string) (jwksURL, discoveredIssuer string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, issuer+"/.well-known/openid-configuration", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/.well-known/openid-configuration", nil)
 	if err != nil {
 		return "", "", fmt.Errorf("oidc discovery: %w", err)
 	}
@@ -81,6 +101,24 @@ func discoverJWKS(issuer string) (jwksURL, discoveredIssuer string, err error) {
 		return "", "", fmt.Errorf("oidc discovery: missing jwks_uri")
 	}
 	return doc.JWKSURI, doc.Issuer, nil
+}
+
+// rewriteURLOrigin replaces scheme://host[:port] of raw with that of originBase.
+func rewriteURLOrigin(raw, originBase string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	base, err := url.Parse(originBase)
+	if err != nil {
+		return "", err
+	}
+	if base.Scheme == "" || base.Host == "" {
+		return "", fmt.Errorf("invalid origin %q", originBase)
+	}
+	u.Scheme = base.Scheme
+	u.Host = base.Host
+	return u.String(), nil
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (Principal, error) {

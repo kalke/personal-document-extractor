@@ -12,59 +12,33 @@ Upload a PDF or image with a `doc_type`, get typed fields back. Extraction uses 
 
 Prerequisites: [Docker](https://docs.docker.com/get-docker/) with Compose v2, and [Make](https://www.gnu.org/software/make/).
 
-Sibling IdP (optional, for JWT): clone/create [`kalke-auth`](https://github.com/kalke/kalke-auth) next to this repo.
+Sibling IdP: [`kalke-auth`](https://github.com/kalke/kalke-auth) next to this repo (shared Docker network `kalke-auth`).
 
 ```bash
 make setup                 # creates .env (+ kalke-auth/.env if sibling exists)
 # edit .env → set GROQ_API_KEY
 
-make setup-oidc            # required OIDC_ISSUER / OIDC_AUDIENCE (kalke-auth)
-make auth-up               # Keycloak behind Caddy on :8443
-make deps-up               # postgres + redis
-make run                   # API on host (OIDC discovery needs reachable issuer)
+make setup-oidc            # OIDC_ISSUER / OIDC_AUDIENCE
+make up-all                # Keycloak+Caddy + API+Postgres+Redis (all containers)
 make ready
+make smoke-m2m             # expect HTTP 400 (auth OK)
 ```
 
-API listens on `http://localhost:8080`. All `/v1/*` routes require `Authorization: Bearer <oidc-jwt>`.
+Everything is in Docker Desktop: `api`, `postgres`, `redis`, plus kalke-auth (`caddy`, `keycloak`, …).
 
-### Full local stack (API + OIDC IdP)
+- API: `http://localhost:8080`
+- IdP (host): `http://localhost:8443`
+- Inside Compose, the API reaches JWKS via `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while JWT `iss` stays `http://localhost:8443/realms/kalke`.
 
 ```bash
-make setup
-# set GROQ_API_KEY in .env
-
-make up-all                # kalke-auth + Compose API (JWT from host `make run` preferred)
-make auth-jwks
-make auth-m2m-token        # client_credentials token for machines
+make reset                 # recreate API stack, truncate extractions
+make logs SERVICE=api
+make down / make down-all
+make destroy               # wipe API volumes
 ```
 
-### JWT smoke (host API + kalke-auth)
+Optional host API (`make deps-up && make run`) still works if `OIDC_DISCOVERY_URL` is unset.
 
-Compose API containers cannot reach `localhost:8443` on the host. For OIDC end-to-end:
-
-```bash
-make setup-oidc            # writes OIDC_ISSUER / OIDC_AUDIENCE into .env
-make auth-up
-make deps-up               # postgres + redis only
-make run                   # API on host (separate terminal)
-make smoke-oidc            # human password token → extract auth check
-make smoke-m2m             # client_credentials → extract auth check
-# or: make extract TOKEN=$(make -s auth-token) FILE=./doc.pdf
-```
-
-```bash
-make logs                  # follow all logs
-make logs SERVICE=api      # API only
-
-make down                  # stop API stack (keeps DB volume)
-make down-all              # stop API stack + kalke-auth
-make reset                 # docker down/up deps + truncate + host API (fica no ar)
-make stop-api              # para a API do reset
-make destroy               # stop and delete volumes
-```
-
-**Nota:** depois do `make reset`, **não** rode `make up` — isso sobe o container Docker na `:8080` e tira a API do host (JWT local). Use só `reset` + `auth-up`.
-```
 ### Everyday Make targets
 
 | Target | What it does |
@@ -72,13 +46,12 @@ make destroy               # stop and delete volumes
 | `make help` | List all targets |
 | `make setup` | Create `.env` if missing (+ sibling `kalke-auth/.env`) |
 | `make setup-oidc` | Enable local OIDC_* pointing at kalke-auth |
-| `make up` | Build and start the API stack (detached) |
-| `make up-all` | `auth-up` + `up` |
-| `make deps-up` | Postgres + Redis only (for host `make run`) |
+| `make up` | Build/start API + Postgres + Redis (needs network `kalke-auth`) |
+| `make up-all` | `auth-up` + `up` (full Docker) |
+| `make deps-up` | Postgres + Redis only |
 | `make up-fg` | API stack, foreground |
 | `make down` / `make down-all` | Stop API stack / also stop kalke-auth |
-| `make reset` | Recreate deps, truncate `extractions`, start durable host API (`bin/api`) |
-| `make stop-api` | Stop host API from `make reset` |
+| `make reset` | Recreate full API Compose stack + truncate `extractions` |
 | `make destroy` | Stop and remove volumes |
 | `make auth-up` / `auth-down` / `auth-logs` | Manage sibling [`kalke-auth`](../kalke-auth) |
 | `make auth-jwks` / `auth-token` | JWKS check / demo access token |
@@ -96,7 +69,7 @@ make destroy               # stop and delete volumes
 | `make test` | Unit + integration tests (no Docker) |
 | `make test-race` / `make test-cover` | Race detector / coverage |
 | `make ci` | `lint` + `test` + build |
-| `make run` | Run API on the host (optional local path) |
+| `make run` | Run API on the host (optional) |
 
 ## Migrations
 
@@ -179,13 +152,13 @@ Identity lives in the IdP. This API does **not** keep a local `users` table. Suc
 
 #### OIDC setup
 
-1. Sibling [`kalke-auth`](../kalke-auth): `make auth-up` (re-import realm after changes with `make -C ../kalke-auth destroy && make auth-up`).
+1. Sibling [`kalke-auth`](../kalke-auth): `make auth-up` (re-import realm: `make -C ../kalke-auth destroy && make auth-up`).
 2. `make setup-oidc`
-3. Host API: `make deps-up && make run`
+3. `make up` / `make reset` / `make up-all` (API in Docker)
 4. Human smoke: `make smoke-oidc` · M2M smoke: `make smoke-m2m`
 5. IdP roles → `permissions`: `extract:write`, `admin`
 
-When the API runs **inside Docker**, `localhost` is the container — prefer host `make run` for JWT, or align `KC_HOSTNAME` / `OIDC_ISSUER`.
+The API container joins Docker network `kalke-auth` and loads JWKS from `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while validating JWT `iss` as `http://localhost:8443/realms/kalke` (`OIDC_ISSUER`).
 
 ### Rate limiting
 

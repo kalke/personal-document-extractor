@@ -1,5 +1,5 @@
 services:
-  postgres:
+  db:
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-extractor}
@@ -14,6 +14,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - default
 
   redis:
     image: redis:7-alpine
@@ -24,11 +26,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - default
 
   api:
     build: .
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -41,17 +45,33 @@ services:
       GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: json
-      DATABASE_URL: postgres://${POSTGRES_USER:-extractor}:${POSTGRES_PASSWORD:-extractor}@postgres:5432/${POSTGRES_DB:-extractor}?sslmode=disable
+      # Hostname `db` (not `postgres`) — avoids colliding with kalke-auth's postgres on network kalke-auth.
+      DATABASE_URL: postgres://${POSTGRES_USER:-extractor}:${POSTGRES_PASSWORD:-extractor}@db:5432/${POSTGRES_DB:-extractor}?sslmode=disable
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       REDIS_CACHE_TTL: ${REDIS_CACHE_TTL:-24h}
-      # Required OIDC (host JWT smoke: make setup-oidc + make run).
-      # localhost inside the API container is not the host — prefer host run for JWT.
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      # Public iss in JWTs (clients use localhost:8443 via Caddy on the host).
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8443/realms/kalke}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-personal-document-extractor}
+      # Reachable discovery from this container (kalke-auth Caddy on shared network).
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-http://caddy:8443/realms/kalke}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 25s
+    networks:
+      - default
+      - kalke-auth
 
 volumes:
   pgdata:
+
+networks:
+  kalke-auth:
+    external: true
+    name: kalke-auth
