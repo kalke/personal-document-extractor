@@ -12,7 +12,7 @@ Upload a PDF or image with a `doc_type`, get typed fields back. Extraction uses 
 
 Prerequisites: [Docker](https://docs.docker.com/get-docker/) with Compose v2, and [Make](https://www.gnu.org/software/make/).
 
-Sibling IdP (optional, for JWT): clone/create [`kalke-auth`](../kalke-auth) next to this repo.
+Sibling IdP (optional, for JWT): clone/create [`kalke-auth`](https://github.com/kalke/kalke-auth) next to this repo.
 
 ```bash
 make setup                 # creates .env (+ kalke-auth/.env if sibling exists)
