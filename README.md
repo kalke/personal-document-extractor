@@ -58,6 +58,7 @@ make logs SERVICE=api      # API only
 
 make down                  # stop API stack (keeps DB volume)
 make down-all              # stop API stack + kalke-auth
+make reset                 # docker down + up (deps), free :8080, truncate extractions
 make destroy               # stop and delete volumes
 ```
 
@@ -73,6 +74,7 @@ make destroy               # stop and delete volumes
 | `make deps-up` | Postgres + Redis only (for host `make run`) |
 | `make up-fg` | API stack, foreground |
 | `make down` / `make down-all` | Stop API stack / also stop kalke-auth |
+| `make reset` | `compose down` + `up` (postgres/redis), free `:8080`, truncate `extractions` |
 | `make destroy` | Stop and remove volumes |
 | `make auth-up` / `auth-down` / `auth-logs` | Manage sibling [`kalke-auth`](../kalke-auth) |
 | `make auth-jwks` / `auth-token` | JWKS check / demo access token |

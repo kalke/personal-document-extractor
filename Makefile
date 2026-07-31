@@ -83,6 +83,19 @@ down-all: down auth-down ## Stop API stack and kalke-auth
 destroy: ## Stop stack and delete volumes (destructive)
 	$(COMPOSE) down -v
 
+.PHONY: reset
+reset: ## Docker down + up (postgres/redis); free :8080; truncate extractions
+	@echo "Stopping listeners on :$(APP_PORT)..."
+	@-fuser -k "$(APP_PORT)/tcp" >/dev/null 2>&1 || true
+	$(COMPOSE) down
+	$(COMPOSE) up -d --wait postgres redis
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		user=$${POSTGRES_USER:-extractor}; \
+		db=$${POSTGRES_DB:-extractor}; \
+		$(COMPOSE) exec -T postgres psql -U "$$user" -d "$$db" -c "TRUNCATE TABLE extractions;"
+	@echo "Reset OK — stack recreated, extractions truncated."
+	@echo "Start API: make run"
+
 .PHONY: restart
 restart: ## Restart all Compose services
 	$(COMPOSE) restart
