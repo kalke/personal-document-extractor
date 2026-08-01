@@ -320,7 +320,7 @@ func TestExtractValidation(t *testing.T) {
 
 func TestExtractCacheHitAndMiss(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	st := &memoryStore{}
@@ -387,7 +387,7 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 
 func TestExtractValidatesBeforeCache(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	ex := &stubExtractor{
@@ -418,7 +418,7 @@ func TestExtractValidatesBeforeCache(t *testing.T) {
 
 func TestExtractRefreshBypassesCacheAndReplaces(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	st := &memoryStore{}
