@@ -166,7 +166,7 @@ func (a *Authenticator) authenticatePAT(ctx context.Context, token string) (Prin
 	if err != nil {
 		return Principal{}, ErrUnauthorized
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return Principal{}, ErrUnauthorized
 	}
