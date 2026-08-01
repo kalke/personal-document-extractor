@@ -13,7 +13,7 @@ info:
     id `azp` (`auth_client`), and `email` when present (`auth_email`).
 
     **AuthZ scopes:** `extract:write`, `admin` (implies all).
-    JWT tokens without IdP `permissions` receive default `extract:write`.
+    JWT tokens without IdP `permissions` / matching scopes are rejected (fail closed).
 
     **Errors:** unless noted, error bodies are `{"error":"<message>"}`.
   license:

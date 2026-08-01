@@ -29,6 +29,7 @@ Everything is in Docker Desktop: `api`, `postgres`, `redis`, plus kalke-auth (`c
 - API: `http://localhost:8080`
 - IdP (host): `http://localhost:8443`
 - Inside Compose, the API reaches JWKS via `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while JWT `iss` stays `http://localhost:8443/realms/kalke`.
+- Production: **`pde.kalke.dev`** (Cloudflare Containers + Neon + Upstash) — see [DEPLOY.md](DEPLOY.md). Hosted sandbox: [kalke.dev](https://kalke.dev).
 
 ```bash
 make reset                 # recreate API stack, truncate extractions
@@ -148,7 +149,7 @@ make ready
 
 Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`, e.g. `pde-m2m` / `kalke-cli`), and `auth_email` when the token includes it (humans).
 
-`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` defaults to `extract:write`. `/health` and `/ready` stay public.
+`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` fail closed (no implicit write). `/health` and `/ready` stay public.
 
 #### OIDC setup
 

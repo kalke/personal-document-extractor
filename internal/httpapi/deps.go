@@ -46,6 +46,7 @@ type Deps struct {
 	Cache          ResultCache
 	Extractions    ExtractionStore
 	TrustedProxies []*net.IPNet
+	CORSOrigins    []string
 	Auth           Authenticator
 	RateLimit      RateLimiter
 	RequiredScope  string

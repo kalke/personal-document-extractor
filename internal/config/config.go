@@ -20,8 +20,10 @@ type Config struct {
 	RedisAddr          string
 	RedisPassword      string
 	RedisDB            int
+	RedisTLS           bool
 	RedisCacheTTL      time.Duration
 	TrustedProxies     []*net.IPNet
+	CORSOrigins        []string
 	OIDCIssuer         string
 	OIDCAudience       string
 	OIDCDiscoveryURL   string
@@ -64,6 +66,16 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required")
 	}
 
+	// Empty CORS_ORIGINS → production hosts only. Local Vite must set
+	// localhost explicitly via .env (see .env.example).
+	corsOrigins := parseCSV(os.Getenv("CORS_ORIGINS"))
+	if len(corsOrigins) == 0 {
+		corsOrigins = []string{
+			"https://kalke.dev",
+			"https://www.kalke.dev",
+		}
+	}
+
 	cfg := Config{
 		Port:               getenv("PORT", "8080"),
 		GroqAPIKey:         strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
@@ -75,8 +87,10 @@ func Load() (Config, error) {
 		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
 		RedisDB:            redisDB,
+		RedisTLS:           parseBool(os.Getenv("REDIS_TLS"), false),
 		RedisCacheTTL:      ttl,
 		TrustedProxies:     trusted,
+		CORSOrigins:        corsOrigins,
 		OIDCIssuer:         oidcIssuer,
 		OIDCAudience:       oidcAudience,
 		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
@@ -145,4 +159,34 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseBool(raw string, fallback bool) bool {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func parseCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

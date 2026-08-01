@@ -162,7 +162,7 @@ func (a *Authenticator) authenticateJWT(tokenStr string) (Principal, error) {
 }
 
 // scopesFromClaims prefers the permissions claim, then space-separated scope.
-// When neither is present, grants extract:write (bootstrap without IdP RBAC).
+// Empty claims fail closed (no implicit extract:write).
 func scopesFromClaims(permissions []string, scope string) []string {
 	if len(permissions) > 0 {
 		return append([]string(nil), permissions...)
@@ -170,5 +170,5 @@ func scopesFromClaims(permissions []string, scope string) []string {
 	if scope != "" {
 		return strings.Fields(scope)
 	}
-	return []string{ScopeExtractWrite}
+	return nil
 }
