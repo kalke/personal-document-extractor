@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,13 +16,24 @@ const (
 	pingTimeout = 2 * time.Second
 )
 
-func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
 	cfg.MaxConns = 10
 	cfg.MinConns = 1
+	path := "pde"
+	if len(searchPath) > 0 && searchPath[0] != "" {
+		path = searchPath[0]
+	}
+	if path != "" {
+		p := path
+		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, err := conn.Exec(ctx, "SET search_path TO "+p+", public")
+			return err
+		}
+	}
 
 	var pool *pgxpool.Pool
 	var lastErr error

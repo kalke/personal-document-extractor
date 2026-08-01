@@ -24,6 +24,7 @@ function apiEnvVars(env: Env): Record<string, string> {
 	return {
 		PORT: "8080",
 		DATABASE_URL: env.DATABASE_URL,
+		DB_SEARCH_PATH: "pde",
 		REDIS_ADDR: env.REDIS_ADDR,
 		REDIS_PASSWORD: env.REDIS_PASSWORD || "",
 		REDIS_TLS: env.REDIS_TLS || "true",

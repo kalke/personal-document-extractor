@@ -17,7 +17,11 @@ func main() {
 		slog.Error("DATABASE_URL is required")
 		os.Exit(1)
 	}
-	if err := migrate.Up(context.Background(), databaseURL); err != nil {
+	searchPath := os.Getenv("DB_SEARCH_PATH")
+	if searchPath == "" {
+		searchPath = "pde"
+	}
+	if err := migrate.Up(context.Background(), databaseURL, searchPath); err != nil {
 		slog.Error("migrate failed", "err", err)
 		os.Exit(1)
 	}

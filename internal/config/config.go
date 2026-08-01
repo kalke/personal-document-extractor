@@ -17,6 +17,7 @@ type Config struct {
 	LogLevel           string
 	LogFormat          string
 	DatabaseURL        string
+	DBSearchPath       string
 	RedisAddr          string
 	RedisPassword      string
 	RedisDB            int
@@ -86,6 +87,7 @@ func Load() (Config, error) {
 		LogLevel:           strings.ToLower(getenv("LOG_LEVEL", "info")),
 		LogFormat:          strings.ToLower(getenv("LOG_FORMAT", "text")),
 		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DBSearchPath:       getenv("DB_SEARCH_PATH", "pde"),
 		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
 		RedisDB:            redisDB,
