@@ -149,7 +149,7 @@ make ready
 
 Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`, e.g. `pde-m2m` / `kalke-cli`), and `auth_email` when the token includes it (humans).
 
-`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` defaults to `extract:write`. `/health` and `/ready` stay public.
+`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` fail closed (no implicit write). `/health` and `/ready` stay public.
 
 #### OIDC setup
 
