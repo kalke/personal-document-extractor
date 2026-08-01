@@ -24,8 +24,8 @@ func TestScopesFromClaims(t *testing.T) {
 			want:  []string{ScopeExtractWrite, "openid"},
 		},
 		{
-			name: "defaults_when_empty",
-			want: []string{ScopeExtractWrite},
+			name: "empty_fails_closed",
+			want: nil,
 		},
 	}
 	for _, tc := range cases {

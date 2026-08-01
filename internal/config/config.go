@@ -66,13 +66,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE are required")
 	}
 
+	// Empty CORS_ORIGINS → production hosts only. Local Vite must set
+	// localhost explicitly via .env (see .env.example).
 	corsOrigins := parseCSV(os.Getenv("CORS_ORIGINS"))
 	if len(corsOrigins) == 0 {
 		corsOrigins = []string{
 			"https://kalke.dev",
 			"https://www.kalke.dev",
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
 		}
 	}
 
