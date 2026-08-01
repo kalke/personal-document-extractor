@@ -35,6 +35,7 @@ type Server struct {
 	cache          ResultCache
 	extractions    ExtractionStore
 	trustedProxies []*net.IPNet
+	corsOrigins    []string
 	auth           Authenticator
 	limiter        RateLimiter
 }
@@ -59,12 +60,14 @@ func New(deps Deps) (http.Handler, error) {
 		cache:          deps.Cache,
 		extractions:    deps.Extractions,
 		trustedProxies: deps.TrustedProxies,
+		corsOrigins:    deps.CORSOrigins,
 		auth:           deps.Auth,
 		limiter:        deps.RateLimit,
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
+	r.Use(s.cors)
 	r.Use(accessLog)
 
 	r.Get("/health", s.health)

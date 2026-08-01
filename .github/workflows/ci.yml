@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     name: Lint and test
@@ -57,6 +61,38 @@ jobs:
     needs: quality
     steps:
       - uses: actions/checkout@v4
-
       - name: Docker build
         run: docker build -t personal-document-extractor:ci .
+
+  deploy:
+    name: Deploy to Cloudflare Containers
+    needs: [quality, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Deploy Worker + Container
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.88.0"
+          command: deploy
+          secrets: |
+            DATABASE_URL
+            REDIS_ADDR
+            REDIS_PASSWORD
+            OIDC_ISSUER
+            GROQ_API_KEY
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}

@@ -10,6 +10,12 @@
 # Env / secrets
 .env
 .env.local
+.dev.vars
+.dev.vars.*
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
 
 # IDE / OS
 .idea/

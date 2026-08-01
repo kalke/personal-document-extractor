@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +18,16 @@ type Cache struct {
 	ttl time.Duration
 }
 
-func New(addr, password string, db int, ttl time.Duration) *Cache {
-	rdb := redis.NewClient(&redis.Options{
+func New(addr, password string, db int, ttl time.Duration, useTLS bool) *Cache {
+	opts := &redis.Options{
 		Addr:     addr,
 		Password: password,
 		DB:       db,
-	})
+	}
+	if useTLS {
+		opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	rdb := redis.NewClient(opts)
 	return &Cache{rdb: rdb, ttl: ttl}
 }
 
