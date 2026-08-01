@@ -4,7 +4,10 @@ import "context"
 
 type Kind string
 
-const KindJWT Kind = "jwt"
+const (
+	KindJWT Kind = "jwt"
+	KindPAT Kind = "pat"
+)
 
 const (
 	ScopeExtractWrite = "extract:write"

@@ -17,6 +17,7 @@ type Config struct {
 	LogLevel           string
 	LogFormat          string
 	DatabaseURL        string
+	DBSearchPath       string
 	RedisAddr          string
 	RedisPassword      string
 	RedisDB            int
@@ -27,6 +28,8 @@ type Config struct {
 	OIDCIssuer         string
 	OIDCAudience       string
 	OIDCDiscoveryURL   string
+	AuthIntrospectURL  string
+	IntrospectSecret   string
 	RateLimitPerMinute int
 }
 
@@ -84,6 +87,7 @@ func Load() (Config, error) {
 		LogLevel:           strings.ToLower(getenv("LOG_LEVEL", "info")),
 		LogFormat:          strings.ToLower(getenv("LOG_FORMAT", "text")),
 		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DBSearchPath:       getenv("DB_SEARCH_PATH", "pde"),
 		RedisAddr:          getenv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
 		RedisDB:            redisDB,
@@ -94,6 +98,8 @@ func Load() (Config, error) {
 		OIDCIssuer:         oidcIssuer,
 		OIDCAudience:       oidcAudience,
 		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
+		AuthIntrospectURL:  strings.TrimSpace(os.Getenv("AUTH_INTROSPECT_URL")),
+		IntrospectSecret:   strings.TrimSpace(os.Getenv("INTROSPECT_SECRET")),
 		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {

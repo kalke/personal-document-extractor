@@ -41,13 +41,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := migrate.Up(ctx, cfg.DatabaseURL); err != nil {
+	if err := migrate.Up(ctx, cfg.DatabaseURL, cfg.DBSearchPath); err != nil {
 		slog.Error("migrate", "err", err)
 		os.Exit(1)
 	}
 	slog.Info("migrations applied")
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	pool, err := db.Connect(ctx, cfg.DatabaseURL, cfg.DBSearchPath)
 	if err != nil {
 		slog.Error("database", "err", err)
 		os.Exit(1)
@@ -69,9 +69,11 @@ func main() {
 	)
 
 	authenticator, err := auth.NewAuthenticator(auth.Options{
-		Issuer:       cfg.OIDCIssuer,
-		Audience:     cfg.OIDCAudience,
-		DiscoveryURL: cfg.OIDCDiscoveryURL,
+		Issuer:           cfg.OIDCIssuer,
+		Audience:         cfg.OIDCAudience,
+		DiscoveryURL:     cfg.OIDCDiscoveryURL,
+		IntrospectURL:    cfg.AuthIntrospectURL,
+		IntrospectSecret: cfg.IntrospectSecret,
 	})
 	if err != nil {
 		slog.Error("auth", "err", err)

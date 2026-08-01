@@ -28,3 +28,7 @@ coverage.out
 *.test
 tmp/
 .tmp/
+
+# local production env (never commit)
+prod.env
+.env.prod

@@ -13,7 +13,9 @@
 	"vars": {
 		"REDIS_TLS": "true",
 		"REDIS_DB": "0",
+		"DB_SEARCH_PATH": "pde",
 		"OIDC_AUDIENCE": "personal-document-extractor",
+		"AUTH_INTROSPECT_URL": "https://auth.kalke.dev/v1/introspect",
 		"CORS_ORIGINS": "https://kalke.dev,https://www.kalke.dev",
 		"RATE_LIMIT_PER_MINUTE": "60",
 		"LOG_LEVEL": "info",

@@ -20,12 +20,13 @@ const (
 	pingTimeout = 2 * time.Second
 )
 
-func Up(ctx context.Context, databaseURL string) error {
+func Up(ctx context.Context, databaseURL string, searchPath ...string) error {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
 	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -44,6 +45,16 @@ func Up(ctx context.Context, databaseURL string) error {
 	}
 	if lastErr != nil {
 		return fmt.Errorf("ping db: %w", lastErr)
+	}
+
+	path := "pde"
+	if len(searchPath) > 0 && searchPath[0] != "" {
+		path = searchPath[0]
+	}
+	if path != "" {
+		if _, err := db.ExecContext(ctx, "SET search_path TO "+path+", public"); err != nil {
+			return fmt.Errorf("search_path: %w", err)
+		}
 	}
 
 	goose.SetBaseFS(migrations.FS)

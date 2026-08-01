@@ -89,10 +89,12 @@ jobs:
             REDIS_ADDR
             REDIS_PASSWORD
             OIDC_ISSUER
+            INTROSPECT_SECRET
             GROQ_API_KEY
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
+          INTROSPECT_SECRET: ${{ secrets.INTROSPECT_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}

@@ -12,6 +12,8 @@ export interface Env {
 	GROQ_BASE_URL: string;
 	OIDC_ISSUER: string;
 	OIDC_AUDIENCE: string;
+	AUTH_INTROSPECT_URL: string;
+	INTROSPECT_SECRET: string;
 	CORS_ORIGINS: string;
 	RATE_LIMIT_PER_MINUTE: string;
 	LOG_LEVEL: string;
@@ -22,6 +24,7 @@ function apiEnvVars(env: Env): Record<string, string> {
 	return {
 		PORT: "8080",
 		DATABASE_URL: env.DATABASE_URL,
+		DB_SEARCH_PATH: "pde",
 		REDIS_ADDR: env.REDIS_ADDR,
 		REDIS_PASSWORD: env.REDIS_PASSWORD || "",
 		REDIS_TLS: env.REDIS_TLS || "true",
@@ -31,6 +34,8 @@ function apiEnvVars(env: Env): Record<string, string> {
 		GROQ_BASE_URL: env.GROQ_BASE_URL || "https://api.groq.com/openai/v1",
 		OIDC_ISSUER: env.OIDC_ISSUER,
 		OIDC_AUDIENCE: env.OIDC_AUDIENCE || "personal-document-extractor",
+		AUTH_INTROSPECT_URL: env.AUTH_INTROSPECT_URL || "",
+		INTROSPECT_SECRET: env.INTROSPECT_SECRET || "",
 		CORS_ORIGINS: env.CORS_ORIGINS || "https://kalke.dev,https://www.kalke.dev",
 		RATE_LIMIT_PER_MINUTE: env.RATE_LIMIT_PER_MINUTE || "60",
 		LOG_LEVEL: env.LOG_LEVEL || "info",
