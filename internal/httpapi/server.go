@@ -103,10 +103,8 @@ func accessLog(next http.Handler) http.Handler {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"doc_types": s.extractor.KnownTypes(),
-	})
+	// Opaque liveness only — no capability enumeration on the public surface.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
@@ -116,24 +114,11 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		dbOK = s.pool.Ping(ctx) == nil
 		cancel()
 	}
-	redisOK := false
-	if s.cache != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), readyPingTimeout)
-		redisOK = s.cache.Ping(ctx) == nil
-		cancel()
-	}
-
-	status := http.StatusOK
-	body := map[string]any{
-		"status": "ready",
-		"db":     dbOK,
-		"redis":  redisOK,
-	}
 	if !dbOK {
-		status = http.StatusServiceUnavailable
-		body["status"] = "not_ready"
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready"})
+		return
 	}
-	writeJSON(w, status, body)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
 func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
