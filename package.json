@@ -1,0 +1,17 @@
+{
+	"name": "personal-document-extractor",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev"
+	},
+	"dependencies": {
+		"@cloudflare/containers": "^0.0.30"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20250801.0",
+		"typescript": "^5.9.3",
+		"wrangler": "4.88.0"
+	}
+}

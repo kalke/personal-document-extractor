@@ -25,6 +25,8 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "")
 	t.Setenv("GROQ_MODEL", "")
 	t.Setenv("TRUSTED_PROXIES", "")
+	t.Setenv("CORS_ORIGINS", "")
+	t.Setenv("REDIS_TLS", "")
 	withOIDC(t)
 	t.Setenv("RATE_LIMIT_PER_MINUTE", "")
 
@@ -37,6 +39,12 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.RedisAddr != "localhost:6379" {
 		t.Fatalf("RedisAddr: got %q", cfg.RedisAddr)
+	}
+	if cfg.RedisTLS {
+		t.Fatal("RedisTLS: expected false by default")
+	}
+	if len(cfg.CORSOrigins) == 0 {
+		t.Fatal("CORSOrigins: expected defaults")
 	}
 	if cfg.RedisCacheTTL != 24*time.Hour {
 		t.Fatalf("RedisCacheTTL: got %v", cfg.RedisCacheTTL)

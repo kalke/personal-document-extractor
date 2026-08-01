@@ -54,7 +54,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	redisCache := cache.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.RedisCacheTTL)
+	redisCache := cache.New(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.RedisCacheTTL, cfg.RedisTLS)
 	defer func() { _ = redisCache.Close() }()
 	if err := redisCache.Ping(ctx); err != nil {
 		slog.Warn("redis unavailable at startup; cache will fail open", "err", err)
@@ -85,6 +85,7 @@ func main() {
 		Cache:          redisCache,
 		Extractions:    store.NewExtractions(pool),
 		TrustedProxies: cfg.TrustedProxies,
+		CORSOrigins:    cfg.CORSOrigins,
 		Auth:           authenticator,
 		RateLimit:      limiter,
 		RequiredScope:  auth.ScopeExtractWrite,

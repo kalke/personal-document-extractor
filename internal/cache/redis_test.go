@@ -35,7 +35,7 @@ func TestNilCacheFailOpen(t *testing.T) {
 
 func TestGetSetRoundTrip(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	ctx := context.Background()
@@ -60,7 +60,7 @@ func TestGetSetRoundTrip(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	ctx := context.Background()
@@ -73,7 +73,7 @@ func TestDelete(t *testing.T) {
 
 func TestCorruptCacheDeleted(t *testing.T) {
 	mr := miniredis.RunT(t)
-	c := cache.New(mr.Addr(), "", 0, time.Hour)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
 	t.Cleanup(func() { _ = c.Close() })
 
 	key := cache.Key("identity_document", "bad")
