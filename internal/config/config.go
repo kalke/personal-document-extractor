@@ -27,6 +27,8 @@ type Config struct {
 	OIDCIssuer         string
 	OIDCAudience       string
 	OIDCDiscoveryURL   string
+	AuthIntrospectURL  string
+	IntrospectSecret   string
 	RateLimitPerMinute int
 }
 
@@ -94,6 +96,8 @@ func Load() (Config, error) {
 		OIDCIssuer:         oidcIssuer,
 		OIDCAudience:       oidcAudience,
 		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
+		AuthIntrospectURL:  strings.TrimSpace(os.Getenv("AUTH_INTROSPECT_URL")),
+		IntrospectSecret:   strings.TrimSpace(os.Getenv("INTROSPECT_SECRET")),
 		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {

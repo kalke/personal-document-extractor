@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,16 +18,21 @@ import (
 var ErrUnauthorized = errors.New("unauthorized")
 
 type Authenticator struct {
-	jwtEnabled bool
-	audience   string
-	issuer     string
-	jwks       keyfunc.Keyfunc
+	jwtEnabled       bool
+	audience         string
+	issuer           string
+	jwks             keyfunc.Keyfunc
+	introspectURL    string
+	introspectSecret string
+	http             *http.Client
 }
 
 type Options struct {
-	Issuer       string // Expected JWT iss (public), e.g. http://localhost:8443/realms/kalke
-	Audience     string
-	DiscoveryURL string // Optional fetch base when Issuer is not reachable (Docker → Caddy)
+	Issuer           string // Expected JWT iss (public), e.g. http://localhost:8443/realms/kalke
+	Audience         string
+	DiscoveryURL     string // Optional fetch base when Issuer is not reachable (Docker → Caddy)
+	IntrospectURL    string // Optional PAT introspection (kalke-auth)
+	IntrospectSecret string
 }
 
 func NewAuthenticator(opts Options) (*Authenticator, error) {
@@ -66,10 +72,13 @@ func NewAuthenticator(opts Options) (*Authenticator, error) {
 		return nil, fmt.Errorf("jwks: %w", err)
 	}
 	return &Authenticator{
-		jwtEnabled: true,
-		audience:   audience,
-		issuer:     issuer,
-		jwks:       k,
+		jwtEnabled:       true,
+		audience:         audience,
+		issuer:           issuer,
+		jwks:             k,
+		introspectURL:    strings.TrimSpace(opts.IntrospectURL),
+		introspectSecret: strings.TrimSpace(opts.IntrospectSecret),
+		http:             &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
 
@@ -122,12 +131,56 @@ func rewriteURLOrigin(raw, originBase string) (string, error) {
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, bearerToken string) (Principal, error) {
-	_ = ctx
 	token := strings.TrimSpace(bearerToken)
 	if token == "" || !a.jwtEnabled {
 		return Principal{}, ErrUnauthorized
 	}
+	if strings.HasPrefix(token, "kalke_") {
+		return a.authenticatePAT(ctx, token)
+	}
 	return a.authenticateJWT(token)
+}
+
+type introspectResponse struct {
+	Active      bool     `json:"active"`
+	Sub         string   `json:"sub"`
+	Email       string   `json:"email"`
+	Permissions []string `json:"permissions"`
+}
+
+func (a *Authenticator) authenticatePAT(ctx context.Context, token string) (Principal, error) {
+	if a.introspectURL == "" || a.introspectSecret == "" {
+		return Principal{}, ErrUnauthorized
+	}
+	body, err := json.Marshal(map[string]string{"token": token})
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.introspectURL, bytes.NewReader(body))
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Kalke-Introspect-Key", a.introspectSecret)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return Principal{}, ErrUnauthorized
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Principal{}, ErrUnauthorized
+	}
+	var ir introspectResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ir); err != nil || !ir.Active || ir.Sub == "" {
+		return Principal{}, ErrUnauthorized
+	}
+	return Principal{
+		Subject: ir.Sub,
+		Email:   ir.Email,
+		Client:  "kalke-pat",
+		Kind:    KindPAT,
+		Scopes:  scopesFromClaims(ir.Permissions, ""),
+	}, nil
 }
 
 type oidcClaims struct {

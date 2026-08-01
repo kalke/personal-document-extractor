@@ -69,9 +69,11 @@ func main() {
 	)
 
 	authenticator, err := auth.NewAuthenticator(auth.Options{
-		Issuer:       cfg.OIDCIssuer,
-		Audience:     cfg.OIDCAudience,
-		DiscoveryURL: cfg.OIDCDiscoveryURL,
+		Issuer:           cfg.OIDCIssuer,
+		Audience:         cfg.OIDCAudience,
+		DiscoveryURL:     cfg.OIDCDiscoveryURL,
+		IntrospectURL:    cfg.AuthIntrospectURL,
+		IntrospectSecret: cfg.IntrospectSecret,
 	})
 	if err != nil {
 		slog.Error("auth", "err", err)
