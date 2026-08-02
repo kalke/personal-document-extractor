@@ -14,6 +14,7 @@ export interface Env {
 	OIDC_AUDIENCE: string;
 	AUTH_INTROSPECT_URL: string;
 	INTROSPECT_SECRET: string;
+	ADMIN_EMAILS: string;
 	CORS_ORIGINS: string;
 	RATE_LIMIT_PER_MINUTE: string;
 	LOG_LEVEL: string;
@@ -36,6 +37,7 @@ function apiEnvVars(env: Env): Record<string, string> {
 		OIDC_AUDIENCE: env.OIDC_AUDIENCE || "personal-document-extractor",
 		AUTH_INTROSPECT_URL: env.AUTH_INTROSPECT_URL || "",
 		INTROSPECT_SECRET: env.INTROSPECT_SECRET || "",
+		ADMIN_EMAILS: env.ADMIN_EMAILS || "henriquekalke@icloud.com",
 		CORS_ORIGINS: env.CORS_ORIGINS || "https://kalke.dev,https://www.kalke.dev",
 		RATE_LIMIT_PER_MINUTE: env.RATE_LIMIT_PER_MINUTE || "60",
 		LOG_LEVEL: env.LOG_LEVEL || "info",

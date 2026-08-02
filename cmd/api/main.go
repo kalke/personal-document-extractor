@@ -90,7 +90,7 @@ func main() {
 		CORSOrigins:    cfg.CORSOrigins,
 		Auth:           authenticator,
 		RateLimit:      limiter,
-		RequiredScope:  auth.ScopeExtractWrite,
+		AdminEmails:    cfg.AdminEmails,
 	})
 	if err != nil {
 		slog.Error("httpapi", "err", err)

@@ -49,15 +49,17 @@ func (allowAllLimiter) Allow(context.Context, string, string) (ratelimit.Result,
 	return ratelimit.Result{Allowed: true, Limit: 1000, Remaining: 999}, nil
 }
 
+const testAdminEmail = "henriquekalke@icloud.com"
+
 func defaultTestAuth() *stubAuth {
 	return &stubAuth{
 		principals: map[string]auth.Principal{
 			testBearer: {
 				Subject: "oidc|test",
 				Client:  "kalke-cli",
-				Email:   "test@example.com",
+				Email:   testAdminEmail,
 				Kind:    auth.KindJWT,
-				Scopes:  []string{auth.ScopeExtractWrite},
+				Scopes:  []string{auth.ScopeAdmin},
 			},
 		},
 	}
@@ -138,6 +140,9 @@ func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	if deps.RateLimit == nil {
 		deps.RateLimit = allowAllLimiter{}
 	}
+	if len(deps.AdminEmails) == 0 {
+		deps.AdminEmails = []string{testAdminEmail}
+	}
 	h, err := httpapi.New(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -156,11 +161,19 @@ func TestNewRequiresDeps(t *testing.T) {
 		t.Fatal("expected error for missing rate limiter")
 	}
 	if _, err := httpapi.New(httpapi.Deps{
+		Extractor:   &stubExtractor{},
+		Auth:        defaultTestAuth(),
+		RateLimit:   allowAllLimiter{},
+		AdminEmails: []string{testAdminEmail},
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := httpapi.New(httpapi.Deps{
 		Extractor: &stubExtractor{},
 		Auth:      defaultTestAuth(),
 		RateLimit: allowAllLimiter{},
-	}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	}); err == nil {
+		t.Fatal("expected error for missing admin emails")
 	}
 }
 
@@ -179,7 +192,31 @@ func TestExtractForbiddenScope(t *testing.T) {
 	h := mustHandler(t, httpapi.Deps{
 		Extractor: &stubExtractor{},
 		Auth: &stubAuth{principals: map[string]auth.Principal{
-			testBearer: {Subject: "x", Kind: auth.KindJWT, Scopes: []string{"openid"}},
+			testBearer: {
+				Subject: "x",
+				Email:   testAdminEmail,
+				Kind:    auth.KindJWT,
+				Scopes:  []string{auth.ScopeExtractWrite},
+			},
+		}},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestExtractAdminEmailRequired(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{},
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {
+				Subject: "oidc|admin",
+				Email:   "other@example.com",
+				Kind:    auth.KindJWT,
+				Scopes:  []string{auth.ScopeAdmin},
+			},
 		}},
 	})
 	rec := httptest.NewRecorder()
@@ -201,6 +238,7 @@ func TestExtractAdminScopeAllowed(t *testing.T) {
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			testBearer: {
 				Subject: "oidc|admin",
+				Email:   testAdminEmail,
 				Kind:    auth.KindJWT,
 				Scopes:  []string{auth.ScopeAdmin},
 			},
@@ -364,7 +402,7 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if st.rows[0].AuthSubject == "" {
 		t.Fatalf("expected auth_subject persisted: %+v", st.rows[0])
 	}
-	if st.rows[0].AuthClient != "kalke-cli" || st.rows[0].AuthEmail != "test@example.com" {
+	if st.rows[0].AuthClient != "kalke-cli" || st.rows[0].AuthEmail != testAdminEmail {
 		t.Fatalf("expected auth_client/email persisted: %+v", st.rows[0])
 	}
 

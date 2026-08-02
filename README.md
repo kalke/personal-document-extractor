@@ -141,15 +141,13 @@ make ready
 
 | Scope | Allows |
 |---|---|
-| `extract:write` | `POST /v1/extract` |
-| `admin` | All scopes |
+| `admin` | `POST /v1/extract` (only if email is in `ADMIN_EMAILS`) |
 
-**Human:** password (dev `kalke-cli`) or Authorization Code + PKCE (`kalke-spa`).  
-**M2M:** Keycloak `client_credentials` (`pde-m2m`) — no proprietary product API keys.
+Site signup users never receive `admin`. The API also checks `ADMIN_EMAILS` (default owner email) so a stolen/mis-assigned role on another account still fails closed.
 
-Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`, e.g. `pde-m2m` / `kalke-cli`), and `auth_email` when the token includes it (humans).
+Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`), and `auth_email` when present.
 
-`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` fail closed (no implicit write). `/health` and `/ready` stay public.
+`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` fail closed. `/health` and `/ready` stay public (opaque status only).
 
 #### OIDC setup
 
@@ -157,7 +155,7 @@ Identity lives in the IdP. This API does **not** keep a local `users` table. Suc
 2. `make setup-oidc`
 3. `make up` / `make reset` / `make up-all` (API in Docker)
 4. Human smoke: `make smoke-oidc` · M2M smoke: `make smoke-m2m`
-5. IdP roles → `permissions`: `extract:write`, `admin`
+5. IdP roles → `permissions`: only `admin` (allowlisted email) can extract
 
 The API container joins Docker network `kalke-auth` and loads JWKS from `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while validating JWT `iss` as `http://localhost:8443/realms/kalke` (`OIDC_ISSUER`).
 
@@ -167,7 +165,7 @@ Authenticated extract calls are limited per principal (JWT `sub`) via Redis fixe
 
 ### `POST /v1/extract`
 
-Requires Bearer auth + `extract:write` (or `admin`).
+Requires Bearer auth + `admin` and allowlisted email.
 
 Query:
 

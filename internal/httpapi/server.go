@@ -36,6 +36,7 @@ type Server struct {
 	extractions    ExtractionStore
 	trustedProxies []*net.IPNet
 	corsOrigins    []string
+	adminEmails    []string
 	auth           Authenticator
 	limiter        RateLimiter
 }
@@ -50,9 +51,8 @@ func New(deps Deps) (http.Handler, error) {
 	if deps.RateLimit == nil {
 		return nil, fmt.Errorf("rate limiter is required")
 	}
-	scope := deps.RequiredScope
-	if scope == "" {
-		scope = auth.ScopeExtractWrite
+	if len(deps.AdminEmails) == 0 {
+		return nil, fmt.Errorf("admin emails are required")
 	}
 	s := &Server{
 		extractor:      deps.Extractor,
@@ -61,6 +61,7 @@ func New(deps Deps) (http.Handler, error) {
 		extractions:    deps.Extractions,
 		trustedProxies: deps.TrustedProxies,
 		corsOrigins:    deps.CORSOrigins,
+		adminEmails:    append([]string(nil), deps.AdminEmails...),
 		auth:           deps.Auth,
 		limiter:        deps.RateLimit,
 	}
@@ -75,7 +76,7 @@ func New(deps Deps) (http.Handler, error) {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireScope(scope))
+			r.Use(s.requireAdmin)
 			r.Use(s.rateLimit)
 			r.Post("/extract", s.extract)
 		})
@@ -103,10 +104,8 @@ func accessLog(next http.Handler) http.Handler {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "ok",
-		"doc_types": s.extractor.KnownTypes(),
-	})
+	// Opaque liveness only — no capability enumeration on the public surface.
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
@@ -116,24 +115,11 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		dbOK = s.pool.Ping(ctx) == nil
 		cancel()
 	}
-	redisOK := false
-	if s.cache != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), readyPingTimeout)
-		redisOK = s.cache.Ping(ctx) == nil
-		cancel()
-	}
-
-	status := http.StatusOK
-	body := map[string]any{
-		"status": "ready",
-		"db":     dbOK,
-		"redis":  redisOK,
-	}
 	if !dbOK {
-		status = http.StatusServiceUnavailable
-		body["status"] = "not_ready"
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready"})
+		return
 	}
-	writeJSON(w, status, body)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
 func (s *Server) extract(w http.ResponseWriter, r *http.Request) {

@@ -30,6 +30,7 @@ type Config struct {
 	OIDCDiscoveryURL   string
 	AuthIntrospectURL  string
 	IntrospectSecret   string
+	AdminEmails        []string
 	RateLimitPerMinute int
 }
 
@@ -79,6 +80,11 @@ func Load() (Config, error) {
 		}
 	}
 
+	adminEmails := parseCSV(os.Getenv("ADMIN_EMAILS"))
+	if len(adminEmails) == 0 {
+		adminEmails = []string{"henriquekalke@icloud.com"}
+	}
+
 	cfg := Config{
 		Port:               getenv("PORT", "8080"),
 		GroqAPIKey:         strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
@@ -100,6 +106,7 @@ func Load() (Config, error) {
 		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
 		AuthIntrospectURL:  strings.TrimSpace(os.Getenv("AUTH_INTROSPECT_URL")),
 		IntrospectSecret:   strings.TrimSpace(os.Getenv("INTROSPECT_SECRET")),
+		AdminEmails:        adminEmails,
 		RateLimitPerMinute: rateLimit,
 	}
 	if cfg.GroqAPIKey == "" {

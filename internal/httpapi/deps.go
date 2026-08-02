@@ -49,5 +49,5 @@ type Deps struct {
 	CORSOrigins    []string
 	Auth           Authenticator
 	RateLimit      RateLimiter
-	RequiredScope  string
+	AdminEmails    []string
 }
