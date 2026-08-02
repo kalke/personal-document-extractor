@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/kalke/personal-document-extractor/internal/auth"
-	"github.com/kalke/personal-document-extractor/internal/authz"
 )
 
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -55,17 +54,6 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
-	})
-}
-
-func (s *Server) requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := auth.PrincipalFromContext(r.Context())
-		if !ok || !authz.IsAllowlistedAdmin(p, s.adminEmails) {
-			writeErr(w, http.StatusForbidden, "admin required")
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }
 

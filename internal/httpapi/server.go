@@ -39,7 +39,6 @@ type Server struct {
 	consents       ConsentStore
 	trustedProxies []*net.IPNet
 	corsOrigins    []string
-	adminEmails    []string
 	auth           Authenticator
 	limiter        RateLimiter
 }
@@ -62,7 +61,6 @@ func New(deps Deps) (http.Handler, error) {
 		consents:       deps.Consents,
 		trustedProxies: deps.TrustedProxies,
 		corsOrigins:    deps.CORSOrigins,
-		adminEmails:    append([]string(nil), deps.AdminEmails...),
 		auth:           deps.Auth,
 		limiter:        deps.RateLimit,
 	}
