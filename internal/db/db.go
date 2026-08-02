@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,10 +12,29 @@ import (
 )
 
 const (
-	maxAttempts = 30
-	retryDelay  = time.Second
-	pingTimeout = 2 * time.Second
+	maxAttempts   = 30
+	retryDelay    = time.Second
+	pingTimeout   = 2 * time.Second
+	DefaultSchema = "pde"
 )
+
+var schemaNameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// NormalizeSearchPath returns a safe schema name (default pde).
+func NormalizeSearchPath(path string) (string, error) {
+	if path == "" {
+		path = DefaultSchema
+	}
+	if !schemaNameRe.MatchString(path) {
+		return "", fmt.Errorf("invalid DB_SEARCH_PATH %q", path)
+	}
+	return path, nil
+}
+
+// SearchPathRuntime value for Postgres startup / SET (schema + public fallback).
+func SearchPathRuntime(path string) string {
+	return path + ", public"
+}
 
 func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
@@ -23,16 +43,26 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 	}
 	cfg.MaxConns = 10
 	cfg.MinConns = 1
-	path := "pde"
-	if len(searchPath) > 0 && searchPath[0] != "" {
-		path = searchPath[0]
+
+	raw := DefaultSchema
+	if len(searchPath) > 0 {
+		raw = searchPath[0]
 	}
-	if path != "" {
-		p := path
-		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-			_, err := conn.Exec(ctx, "SET search_path TO "+p+", public")
-			return err
-		}
+	path, err := NormalizeSearchPath(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	// Neon/PgBouncer transaction poolers discard session SET. Startup params stick.
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = SearchPathRuntime(path)
+
+	quoted := pgx.Identifier{path}.Sanitize()
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "SET search_path TO "+quoted+", public")
+		return err
 	}
 
 	var pool *pgxpool.Pool
@@ -44,6 +74,10 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 			lastErr = pool.Ping(pingCtx)
 			cancel()
 			if lastErr == nil {
+				if err := EnsureTables(ctx, pool); err != nil {
+					pool.Close()
+					return nil, err
+				}
 				return pool, nil
 			}
 			pool.Close()
@@ -56,4 +90,19 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 		}
 	}
 	return nil, fmt.Errorf("connect database: %w", lastErr)
+}
+
+// EnsureTables fails fast when migrations/search_path are wrong.
+func EnsureTables(ctx context.Context, pool *pgxpool.Pool) error {
+	checkCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	var extractions, consents *string
+	if err := pool.QueryRow(checkCtx, `SELECT to_regclass('extractions')::text, to_regclass('extract_consents')::text`).
+		Scan(&extractions, &consents); err != nil {
+		return fmt.Errorf("check tables: %w", err)
+	}
+	if extractions == nil || consents == nil {
+		return fmt.Errorf("required tables missing in search_path (extractions=%v extract_consents=%v); check DB_SEARCH_PATH and migrations", extractions, consents)
+	}
+	return nil
 }
