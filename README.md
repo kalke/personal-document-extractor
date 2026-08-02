@@ -156,7 +156,7 @@ The API container joins Docker network `kalke-auth` and loads JWKS from `http://
 
 ### Rate limiting
 
-Authenticated extract calls are limited per principal (JWT `sub`) via Redis fixed 1-minute windows (`RATE_LIMIT_PER_MINUTE`, default **60**). Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. On exceed or Redis failure the API returns **429** (fail-closed) with `Retry-After`.
+Authenticated **cache-miss** extract calls (LLM/Groq) are limited per principal (JWT `sub` / PAT subject) via Redis fixed 1-minute windows (`RATE_LIMIT_PER_MINUTE`, default **60**). Cache hits do **not** consume quota. On LLM attempts, responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`. On exceed or Redis failure the API returns **429** (fail-closed) with `Retry-After`.
 
 ### `POST /v1/extract`
 

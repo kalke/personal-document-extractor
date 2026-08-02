@@ -74,7 +74,6 @@ func New(deps Deps) (http.Handler, error) {
 	r.Get("/ready", s.ready)
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
-		r.Use(s.rateLimit)
 		r.Post("/extract", s.extract)
 	})
 	return r, nil
@@ -183,6 +182,11 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s.invalidateCache(r.Context(), docType, shaHex)
+	}
+
+	// Rate limit only LLM/cache-miss work — cached re-reads are free.
+	if !s.enforceLLMRateLimit(w, r) {
+		return
 	}
 
 	doc, err := preprocess.Prepare(filename, data)

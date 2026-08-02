@@ -292,13 +292,62 @@ func TestExtractRateLimited(t *testing.T) {
 	if rec.Header().Get("X-RateLimit-Limit") == "" {
 		t.Fatal("missing rate limit header")
 	}
+	// Different image bytes → cache miss → second LLM attempt is rate limited.
+	png2 := tinyPNG(t)
+	png2[len(png2)/2] ^= 0x01
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc2.png", png2))
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status %d body %s", rec.Code, rec.Body.String())
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Fatal("missing Retry-After")
+	}
+}
+
+func TestExtractCacheHitSkipsRateLimit(t *testing.T) {
+	mr := miniredis.RunT(t)
+	c := cache.New(mr.Addr(), "", 0, time.Hour, false)
+	t.Cleanup(func() { _ = c.Close() })
+
+	lim := &countingLimiter{limit: 1}
+	ex := &stubExtractor{
+		result: extract.Result{
+			DocType: "identity_document",
+			Data:    map[string]any{"nome": "X"},
+			Meta:    extract.Meta{Mode: "vision"},
+		},
+	}
+	h := mustHandler(t, httpapi.Deps{
+		Extractor:   ex,
+		Cache:       c,
+		Extractions: &memoryStore{},
+		RateLimit:   lim,
+	})
+	png := tinyPNG(t)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("miss status %d", rec.Code)
+	}
+	if lim.n != 1 {
+		t.Fatalf("limiter calls on miss: %d", lim.n)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", png))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hit status %d body %s", rec.Code, rec.Body.String())
+	}
+	if lim.n != 1 {
+		t.Fatalf("cache hit must not consume rate limit; got %d", lim.n)
+	}
+	if rec.Header().Get("X-RateLimit-Limit") != "" {
+		t.Fatal("cache hit should not set rate limit headers")
+	}
+	if ex.callCount() != 1 {
+		t.Fatalf("extractor calls=%d", ex.callCount())
 	}
 }
 
