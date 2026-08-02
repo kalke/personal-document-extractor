@@ -132,6 +132,28 @@ func (m *memoryStore) replaceCount() int {
 	return m.replaced
 }
 
+type memoryConsentStore struct {
+	mu   sync.Mutex
+	rows []store.ConsentRecord
+	err  error
+}
+
+func (m *memoryConsentStore) Insert(_ context.Context, rec store.ConsentRecord) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rows = append(m.rows, rec)
+	return nil
+}
+
+func (m *memoryConsentStore) len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.rows)
+}
+
 func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	t.Helper()
 	if deps.Auth == nil {
@@ -140,8 +162,8 @@ func mustHandler(t *testing.T, deps httpapi.Deps) http.Handler {
 	if deps.RateLimit == nil {
 		deps.RateLimit = allowAllLimiter{}
 	}
-	if len(deps.AdminEmails) == 0 {
-		deps.AdminEmails = []string{testAdminEmail}
+	if deps.Consents == nil {
+		deps.Consents = &memoryConsentStore{}
 	}
 	h, err := httpapi.New(deps)
 	if err != nil {
@@ -161,19 +183,11 @@ func TestNewRequiresDeps(t *testing.T) {
 		t.Fatal("expected error for missing rate limiter")
 	}
 	if _, err := httpapi.New(httpapi.Deps{
-		Extractor:   &stubExtractor{},
-		Auth:        defaultTestAuth(),
-		RateLimit:   allowAllLimiter{},
-		AdminEmails: []string{testAdminEmail},
-	}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := httpapi.New(httpapi.Deps{
 		Extractor: &stubExtractor{},
 		Auth:      defaultTestAuth(),
 		RateLimit: allowAllLimiter{},
-	}); err == nil {
-		t.Fatal("expected error for missing admin emails")
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -188,65 +202,52 @@ func TestExtractUnauthorized(t *testing.T) {
 	}
 }
 
-func TestExtractForbiddenScope(t *testing.T) {
-	h := mustHandler(t, httpapi.Deps{
-		Extractor: &stubExtractor{},
-		Auth: &stubAuth{principals: map[string]auth.Principal{
-			testBearer: {
-				Subject: "x",
-				Email:   testAdminEmail,
-				Kind:    auth.KindJWT,
-				Scopes:  []string{auth.ScopeExtractWrite},
-			},
-		}},
-	})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestExtractAdminEmailRequired(t *testing.T) {
-	h := mustHandler(t, httpapi.Deps{
-		Extractor: &stubExtractor{},
-		Auth: &stubAuth{principals: map[string]auth.Principal{
-			testBearer: {
-				Subject: "oidc|admin",
-				Email:   "other@example.com",
-				Kind:    auth.KindJWT,
-				Scopes:  []string{auth.ScopeAdmin},
-			},
-		}},
-	})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestExtractAdminScopeAllowed(t *testing.T) {
+func TestExtractAnyAuthenticatedUserAllowed(t *testing.T) {
+	consents := &memoryConsentStore{}
 	h := mustHandler(t, httpapi.Deps{
 		Extractor: &stubExtractor{
 			result: extract.Result{
 				DocType: "identity_document",
-				Data:    map[string]any{"nome": "ADMIN"},
+				Data:    map[string]any{"nome": "USER"},
 				Meta:    extract.Meta{Mode: "vision"},
 			},
 		},
+		Consents: consents,
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			testBearer: {
-				Subject: "oidc|admin",
-				Email:   testAdminEmail,
+				Subject: "oidc|signup-user",
+				Email:   "recruiter@example.com",
 				Kind:    auth.KindJWT,
-				Scopes:  []string{auth.ScopeAdmin},
+				Scopes:  []string{"openid"},
 			},
 		}},
 	})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
 	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if consents.len() != 1 {
+		t.Fatalf("expected consent row, got %d", consents.len())
+	}
+	if consents.rows[0].PolicyVersion != store.PolicyLGPDExtractV1 {
+		t.Fatalf("policy %q", consents.rows[0].PolicyVersion)
+	}
+}
+
+func TestExtractConsentRequired(t *testing.T) {
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{
+			result: extract.Result{
+				DocType: "identity_document",
+				Data:    map[string]any{"nome": "X"},
+				Meta:    extract.Meta{Mode: "vision"},
+			},
+		},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequestNoConsent(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
@@ -555,6 +556,16 @@ func TestExtractMapsErrors(t *testing.T) {
 
 func multipartRequest(t *testing.T, url, filename string, data []byte) *http.Request {
 	t.Helper()
+	return multipartRequestOpt(t, url, filename, data, true)
+}
+
+func multipartRequestNoConsent(t *testing.T, url, filename string, data []byte) *http.Request {
+	t.Helper()
+	return multipartRequestOpt(t, url, filename, data, false)
+}
+
+func multipartRequestOpt(t *testing.T, url, filename string, data []byte, withConsent bool) *http.Request {
+	t.Helper()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	part, err := w.CreateFormFile("file", filename)
@@ -563,6 +574,11 @@ func multipartRequest(t *testing.T, url, filename string, data []byte) *http.Req
 	}
 	if _, err := io.Copy(part, bytes.NewReader(data)); err != nil {
 		t.Fatal(err)
+	}
+	if withConsent {
+		if err := w.WriteField("consent", store.PolicyLGPDExtractV1); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)

@@ -12,8 +12,12 @@ info:
     local `users` table — audit via JWT `sub` (`auth_subject`), OAuth client
     id `azp` (`auth_client`), and `email` when present (`auth_email`).
 
-    **AuthZ scopes:** `extract:write`, `admin` (implies all).
-    JWT tokens without IdP `permissions` / matching scopes are rejected (fail closed).
+    **AuthZ:** any authenticated principal (valid OIDC JWT or Kalke PAT via
+    introspection). Rate limits still apply per subject.
+
+    **LGPD:** multipart field `consent` must be `lgpd-extract-v1` (or truthy).
+    Consent rows store subject, email, IP, user-agent, and policy version.
+    Raw files are not stored; content hash + structured result may be kept.
 
     **Errors:** unless noted, error bodies are `{"error":"<message>"}`.
   license:
@@ -74,10 +78,11 @@ paths:
       tags: [extract]
       summary: Extract structured fields from an uploaded document
       description: |
-        Requires `extract:write` or `admin`. Rate-limited per principal (Redis;
-        fail-closed → 429 if Redis unavailable). Successful responses include
-        `X-RateLimit-*` headers. Persist/cache failures after a successful
-        extraction still return 200.
+        Requires a valid Bearer token (any signed-in user / active PAT).
+        Multipart `consent` must equal `lgpd-extract-v1` (LGPD opt-in).
+        Rate-limited per principal (Redis; fail-closed → 429 if Redis unavailable).
+        Successful responses include `X-RateLimit-*` headers. Persist/cache
+        failures after a successful extraction still return 200.
       operationId: extractDocument
       parameters:
         - name: doc_type
@@ -98,12 +103,16 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [file, consent]
               properties:
                 file:
                   type: string
                   format: binary
                   description: PDF, JPEG, PNG, or WebP (max 32 MiB)
+                consent:
+                  type: string
+                  description: LGPD policy version acknowledgement
+                  enum: [lgpd-extract-v1, "true", "1", "yes"]
       responses:
         "200":
           description: Extraction succeeded (`doc_type` + `data` only; no meta)
@@ -141,8 +150,6 @@ paths:
                   value: { error: unknown doc_type }
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "413":
           description: Upload too large
           content:

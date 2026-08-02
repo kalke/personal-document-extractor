@@ -29,11 +29,14 @@ const (
 	multipartOverhead = 1 << 20
 )
 
+const consentPolicyVersion = store.PolicyLGPDExtractV1
+
 type Server struct {
 	extractor      Extractor
 	pool           DBPinger
 	cache          ResultCache
 	extractions    ExtractionStore
+	consents       ConsentStore
 	trustedProxies []*net.IPNet
 	corsOrigins    []string
 	adminEmails    []string
@@ -51,14 +54,12 @@ func New(deps Deps) (http.Handler, error) {
 	if deps.RateLimit == nil {
 		return nil, fmt.Errorf("rate limiter is required")
 	}
-	if len(deps.AdminEmails) == 0 {
-		return nil, fmt.Errorf("admin emails are required")
-	}
 	s := &Server{
 		extractor:      deps.Extractor,
 		pool:           deps.Pool,
 		cache:          deps.Cache,
 		extractions:    deps.Extractions,
+		consents:       deps.Consents,
 		trustedProxies: deps.TrustedProxies,
 		corsOrigins:    deps.CORSOrigins,
 		adminEmails:    append([]string(nil), deps.AdminEmails...),
@@ -75,11 +76,8 @@ func New(deps Deps) (http.Handler, error) {
 	r.Get("/ready", s.ready)
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
-		r.Group(func(r chi.Router) {
-			r.Use(s.requireAdmin)
-			r.Use(s.rateLimit)
-			r.Post("/extract", s.extract)
-		})
+		r.Use(s.rateLimit)
+		r.Post("/extract", s.extract)
 	})
 	return r, nil
 }
@@ -139,6 +137,10 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, err)
 		return
 	}
+	if !consentAccepted(r) {
+		writeErr(w, http.StatusBadRequest, "lgpd consent required (consent="+consentPolicyVersion+")")
+		return
+	}
 
 	// Cheap validation (MIME/extension) before cache — do NOT rasterize PDFs yet.
 	if _, _, err := preprocess.ValidateUpload(filename, data); err != nil {
@@ -157,6 +159,23 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		"refresh", refresh,
 		"client_ip", clientIP,
 	)
+
+	var authSubject, authClient, authEmail string
+	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
+		authSubject = p.Subject
+		authClient = p.Client
+		authEmail = p.Email
+	}
+	s.recordConsent(r.Context(), store.ConsentRecord{
+		UserSub:       authSubject,
+		UserEmail:     authEmail,
+		IP:            clientIP,
+		UserAgent:     userAgent,
+		PolicyVersion: consentPolicyVersion,
+		ContentSHA256: shaHex,
+		DocType:       docType,
+		AcceptedAt:    time.Now().UTC(),
+	}, log)
 
 	if !refresh {
 		if cached, ok := s.lookupCache(r.Context(), docType, shaHex); ok {
@@ -186,12 +205,6 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	result.Meta.ContentSHA256 = shaHex
 	result.Meta.Cache = "miss"
-	var authSubject, authClient, authEmail string
-	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
-		authSubject = p.Subject
-		authClient = p.Client
-		authEmail = p.Email
-	}
 	s.persist(persistArgs{
 		reqID:       reqID,
 		docType:     docType,
@@ -293,6 +306,31 @@ func truthyQuery(r *http.Request, key string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func consentAccepted(r *http.Request) bool {
+	v := strings.TrimSpace(r.FormValue("consent"))
+	if v == "" {
+		v = strings.TrimSpace(r.Header.Get("X-LGPD-Consent"))
+	}
+	v = strings.ToLower(v)
+	switch v {
+	case consentPolicyVersion, "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) recordConsent(ctx context.Context, rec store.ConsentRecord, log *slog.Logger) {
+	if s.consents == nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, persistTimeout)
+	defer cancel()
+	if err := s.consents.Insert(cctx, rec); err != nil {
+		log.Error("persist extract consent failed", "err", err)
 	}
 }
 

@@ -136,18 +136,13 @@ make ready
 
 | Concern | Mechanism |
 |---|---|
-| **AuthN** (who) | `Authorization: Bearer` — OIDC JWT from [`kalke-auth`](../kalke-auth) (Keycloak) |
-| **AuthZ** (what) | JWT `permissions` claim (realm roles) |
+| **AuthN** (who) | `Authorization: Bearer` — OIDC JWT or Kalke PAT (introspected via [`kalke-auth`](../kalke-auth)) |
+| **AuthZ** (what) | Any authenticated principal may call `POST /v1/extract` |
+| **LGPD** | Multipart `consent=lgpd-extract-v1` recorded in `extract_consents` |
 
-| Scope | Allows |
-|---|---|
-| `admin` | `POST /v1/extract` (only if email is in `ADMIN_EMAILS`) |
+Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store audit fields: `auth_subject`, `auth_client`, `auth_email`, plus a consent row (subject, email, IP, user-agent, policy version). **Raw files are not stored**; content hash and structured result may be kept.
 
-Site signup users never receive `admin`. The API also checks `ADMIN_EMAILS` (default owner email) so a stolen/mis-assigned role on another account still fails closed.
-
-Identity lives in the IdP. This API does **not** keep a local `users` table. Successful extracts store JWT audit fields: `auth_subject` (`sub` UUID), `auth_client` (`azp`), and `auth_email` when present.
-
-`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. Empty `permissions` fail closed. `/health` and `/ready` stay public (opaque status only).
+`OIDC_ISSUER` + `OIDC_AUDIENCE` are **required**. JWKS comes from OIDC discovery. `/health` and `/ready` stay public (opaque status only).
 
 #### OIDC setup
 
@@ -155,7 +150,7 @@ Identity lives in the IdP. This API does **not** keep a local `users` table. Suc
 2. `make setup-oidc`
 3. `make up` / `make reset` / `make up-all` (API in Docker)
 4. Human smoke: `make smoke-oidc` · M2M smoke: `make smoke-m2m`
-5. IdP roles → `permissions`: only `admin` (allowlisted email) can extract
+5. Any valid Bearer (signup users included) can extract after LGPD consent
 
 The API container joins Docker network `kalke-auth` and loads JWKS from `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while validating JWT `iss` as `http://localhost:8443/realms/kalke` (`OIDC_ISSUER`).
 
@@ -165,14 +160,14 @@ Authenticated extract calls are limited per principal (JWT `sub`) via Redis fixe
 
 ### `POST /v1/extract`
 
-Requires Bearer auth + `admin` and allowlisted email.
+Requires Bearer auth (any signed-in user / active PAT) + LGPD consent.
 
 Query:
 
 - `doc_type` (required)
 - `refresh` (optional) — `true` / `1` / `yes` skips Redis, soft-deletes prior Postgres row for the same hash, re-extracts, and writes a new row
 
-Body: `multipart/form-data` field `file`.
+Body: `multipart/form-data` fields `file` and `consent` (`lgpd-extract-v1`).
 
 Example response (only `doc_type` + `data` — no `meta`):
 

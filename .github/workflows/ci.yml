@@ -55,10 +55,41 @@ jobs:
           go build -o /tmp/api ./cmd/api
           go build -o /tmp/migrate ./cmd/migrate
 
+  security:
+    name: Security scanners
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gosec
+        uses: securego/gosec@master
+        with:
+          args: ./...
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: trivy fs (non-blocking)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, security]
     steps:
       - uses: actions/checkout@v4
       - name: Docker build
@@ -66,7 +97,7 @@ jobs:
 
   deploy:
     name: Deploy to Cloudflare Containers
-    needs: [quality, docker]
+    needs: [quality, security, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30

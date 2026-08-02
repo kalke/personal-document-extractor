@@ -28,6 +28,10 @@ type ExtractionStore interface {
 	Replace(ctx context.Context, rec store.ExtractionRecord) error
 }
 
+type ConsentStore interface {
+	Insert(ctx context.Context, rec store.ConsentRecord) error
+}
+
 type DBPinger interface {
 	Ping(ctx context.Context) error
 }
@@ -45,9 +49,10 @@ type Deps struct {
 	Pool           DBPinger
 	Cache          ResultCache
 	Extractions    ExtractionStore
+	Consents       ConsentStore
 	TrustedProxies []*net.IPNet
 	CORSOrigins    []string
 	Auth           Authenticator
 	RateLimit      RateLimiter
-	AdminEmails    []string
+	AdminEmails    []string // optional; reserved for future admin-only routes
 }

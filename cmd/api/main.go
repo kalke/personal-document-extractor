@@ -86,6 +86,7 @@ func main() {
 		Pool:           pool,
 		Cache:          redisCache,
 		Extractions:    store.NewExtractions(pool),
+		Consents:       store.NewConsents(pool),
 		TrustedProxies: cfg.TrustedProxies,
 		CORSOrigins:    cfg.CORSOrigins,
 		Auth:           authenticator,
