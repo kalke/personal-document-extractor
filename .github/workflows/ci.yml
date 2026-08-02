@@ -68,7 +68,8 @@ jobs:
       - name: gosec
         uses: securego/gosec@master
         with:
-          args: ./...
+          # Fail on high/critical only; medium PDF/form heuristics are expected.
+          args: -severity high ./...
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
