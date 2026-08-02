@@ -36,6 +36,7 @@ type Server struct {
 	extractions    ExtractionStore
 	trustedProxies []*net.IPNet
 	corsOrigins    []string
+	adminEmails    []string
 	auth           Authenticator
 	limiter        RateLimiter
 }
@@ -50,9 +51,8 @@ func New(deps Deps) (http.Handler, error) {
 	if deps.RateLimit == nil {
 		return nil, fmt.Errorf("rate limiter is required")
 	}
-	scope := deps.RequiredScope
-	if scope == "" {
-		scope = auth.ScopeExtractWrite
+	if len(deps.AdminEmails) == 0 {
+		return nil, fmt.Errorf("admin emails are required")
 	}
 	s := &Server{
 		extractor:      deps.Extractor,
@@ -61,6 +61,7 @@ func New(deps Deps) (http.Handler, error) {
 		extractions:    deps.Extractions,
 		trustedProxies: deps.TrustedProxies,
 		corsOrigins:    deps.CORSOrigins,
+		adminEmails:    append([]string(nil), deps.AdminEmails...),
 		auth:           deps.Auth,
 		limiter:        deps.RateLimit,
 	}
@@ -75,7 +76,7 @@ func New(deps Deps) (http.Handler, error) {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireScope(scope))
+			r.Use(s.requireAdmin)
 			r.Use(s.rateLimit)
 			r.Post("/extract", s.extract)
 		})

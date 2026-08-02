@@ -58,17 +58,15 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireScope(scope string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			p, ok := auth.PrincipalFromContext(r.Context())
-			if !ok || !authz.HasScope(p, scope) {
-				writeErr(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := auth.PrincipalFromContext(r.Context())
+		if !ok || !authz.IsAllowlistedAdmin(p, s.adminEmails) {
+			writeErr(w, http.StatusForbidden, "admin required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) rateLimit(next http.Handler) http.Handler {
