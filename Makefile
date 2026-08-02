@@ -276,15 +276,18 @@ clean: ## Remove local build artifacts
 	rm -rf bin/ dist/ tmp/ .tmp/ coverage.out
 
 COMPOSE_AWS ?= docker compose -f docker-compose.aws.yml
+PDE_IMAGE ?= ghcr.io/kalke/personal-document-extractor:latest
 
 .PHONY: aws-up
-aws-up: ## Prod on AWS EC2: build + start API on kalke-auth network
+aws-up: ## Prod on AWS EC2: pull GHCR image + start API on kalke-auth network
 	@test -f prod.env || { echo "prod.env missing — copy prod.env.example and fill secrets"; exit 1; }
 	@docker network inspect kalke-auth_default >/dev/null 2>&1 || { \
 		echo "Missing Docker network kalke-auth_default. Start kalke-auth first (make aws-up there)."; \
 		exit 1; \
 	}
-	$(COMPOSE_AWS) up --build -d --wait
+	@docker builder prune -af >/dev/null 2>&1 || true
+	PDE_IMAGE="$(PDE_IMAGE)" $(COMPOSE_AWS) pull api
+	PDE_IMAGE="$(PDE_IMAGE)" $(COMPOSE_AWS) up -d --wait --no-build
 	@docker image prune -f >/dev/null 2>&1 || true
 
 .PHONY: aws-down

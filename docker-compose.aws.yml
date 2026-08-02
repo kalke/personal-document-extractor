@@ -1,13 +1,12 @@
 # Production API on the same EC2 as kalke-auth (Neon + Upstash).
-# Cloudflare Containers need Workers Paid; this keeps free-tier deploys working.
+# Image is built in GitHub Actions and pulled from GHCR (EC2 disk is tight).
 #
-#   cp prod.env.example prod.env   # once
+#   cp prod.env.example prod.env   # once / or CI syncs secrets
 #   make aws-up
 #
 services:
   api:
-    build: .
-    image: personal-document-extractor:aws
+    image: ${PDE_IMAGE:-ghcr.io/kalke/personal-document-extractor:latest}
     container_name: pde-api
     restart: unless-stopped
     env_file:
