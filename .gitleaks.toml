@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Example env templates with empty placeholders"
+paths = [
+  '''prod\.env\.example$''',
+  '''\.env\.example$''',
+]
