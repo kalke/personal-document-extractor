@@ -14,7 +14,4 @@ func TestNormalizeSearchPath(t *testing.T) {
 	if _, err := NormalizeSearchPath("pde; drop"); err == nil {
 		t.Fatal("expected invalid schema error")
 	}
-	if SearchPathRuntime("pde") != "pde, public" {
-		t.Fatalf("runtime=%q", SearchPathRuntime("pde"))
-	}
 }

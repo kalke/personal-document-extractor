@@ -31,11 +31,6 @@ func NormalizeSearchPath(path string) (string, error) {
 	return path, nil
 }
 
-// SearchPathRuntime value for Postgres startup / SET (schema + public fallback).
-func SearchPathRuntime(path string) string {
-	return path + ", public"
-}
-
 func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -53,15 +48,19 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 		return nil, err
 	}
 
-	// Neon/PgBouncer transaction poolers discard session SET. Startup params stick.
-	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = map[string]string{}
-	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = SearchPathRuntime(path)
-
+	// Neon pooler (transaction mode) rejects search_path startup params and drops
+	// session SET between transactions. Re-apply on every checkout.
 	quoted := pgx.Identifier{path}.Sanitize()
+	setSQL := "SET search_path TO " + quoted + ", public"
+	cfg.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+		if _, err := conn.Exec(ctx, setSQL); err != nil {
+			slog.Error("set search_path failed", "err", err, "schema", path)
+			return false
+		}
+		return true
+	}
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "SET search_path TO "+quoted+", public")
+		_, err := conn.Exec(ctx, setSQL)
 		return err
 	}
 
