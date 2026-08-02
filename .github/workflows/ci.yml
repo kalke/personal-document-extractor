@@ -113,6 +113,34 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 45
     steps:
+      - name: Ensure repo checkout
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_DIR: /home/ubuntu/personal-document-extractor
+        run: |
+          set -euo pipefail
+          if [[ -d "${REPO_DIR}/.git" ]]; then
+            cd "${REPO_DIR}"
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/kalke/personal-document-extractor.git"
+            git fetch --depth=1 origin main
+            git checkout -B main FETCH_HEAD
+            git remote set-url origin "https://github.com/kalke/personal-document-extractor.git"
+          else
+            # prod.env may already exist from a previous secret sync — preserve it.
+            tmp=""
+            if [[ -f "${REPO_DIR}/prod.env" ]]; then
+              tmp="$(mktemp)"
+              cp "${REPO_DIR}/prod.env" "${tmp}"
+            fi
+            rm -rf "${REPO_DIR}"
+            git clone "https://x-access-token:${GH_TOKEN}@github.com/kalke/personal-document-extractor.git" "${REPO_DIR}"
+            git -C "${REPO_DIR}" remote set-url origin "https://github.com/kalke/personal-document-extractor.git"
+            if [[ -n "${tmp}" ]]; then
+              cp "${tmp}" "${REPO_DIR}/prod.env"
+              rm -f "${tmp}"
+            fi
+          fi
+
       - name: Sync prod.env from GitHub secrets
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -123,8 +151,6 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
-          REPO_DIR="${HOME}/personal-document-extractor"
-          mkdir -p "${REPO_DIR}"
           umask 077
           python3 - <<'PY'
           import os
@@ -132,6 +158,10 @@ jobs:
           path = Path.home() / "personal-document-extractor" / "prod.env"
           def q(v: str) -> str:
               return "'" + v.replace("'", "'\"'\"'") + "'"
+          required = ("DATABASE_URL", "REDIS_ADDR", "INTROSPECT_SECRET", "GROQ_API_KEY")
+          missing = [k for k in required if not os.environ.get(k)]
+          if missing:
+              raise SystemExit(f"missing secrets: {', '.join(missing)}")
           rows = {
               "PORT": "8080",
               "DATABASE_URL": os.environ["DATABASE_URL"],
@@ -152,31 +182,14 @@ jobs:
               "RATE_LIMIT_PER_MINUTE": "60",
               "TRUSTED_PROXIES": "172.16.0.0/12,10.0.0.0/8",
           }
-          missing = [k for k in ("DATABASE_URL", "REDIS_ADDR", "INTROSPECT_SECRET", "GROQ_API_KEY") if not os.environ.get(k)]
-          if missing:
-              raise SystemExit(f"missing secrets: {', '.join(missing)}")
           path.write_text("".join(f"{k}={q(v)}\n" for k, v in rows.items()))
           print(f"wrote {path}")
           PY
 
-      - name: Update and restart stack
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_DIR: /home/ubuntu/personal-document-extractor
+      - name: Build and restart
+        working-directory: /home/ubuntu/personal-document-extractor
         run: |
           set -euo pipefail
-          chmod +x "${REPO_DIR}/deploy/remote-update.sh" 2>/dev/null || true
-          if [[ -x "${REPO_DIR}/deploy/remote-update.sh" ]]; then
-            bash "${REPO_DIR}/deploy/remote-update.sh"
-          else
-            # Bootstrap before script lands on host
-            if [[ ! -d "${REPO_DIR}/.git" ]]; then
-              git clone "https://x-access-token:${GH_TOKEN}@github.com/kalke/personal-document-extractor.git" "${REPO_DIR}"
-            fi
-            cd "${REPO_DIR}"
-            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/kalke/personal-document-extractor.git"
-            git fetch --depth=1 origin main
-            git checkout -B main FETCH_HEAD
-            git remote set-url origin "https://github.com/kalke/personal-document-extractor.git"
-            make aws-up
-          fi
+          docker image prune -f >/dev/null 2>&1 || true
+          make aws-up
+          make aws-ps
