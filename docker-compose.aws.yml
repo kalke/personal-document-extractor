@@ -1,0 +1,39 @@
+# Production API on the same EC2 as kalke-auth (Neon + Upstash).
+# Cloudflare Containers need Workers Paid; this keeps free-tier deploys working.
+#
+#   cp prod.env.example prod.env   # once
+#   make aws-up
+#
+services:
+  api:
+    build: .
+    image: personal-document-extractor:aws
+    container_name: pde-api
+    restart: unless-stopped
+    env_file:
+      - prod.env
+    environment:
+      PORT: "8080"
+      LOG_FORMAT: json
+      REDIS_TLS: "true"
+      OIDC_ISSUER: ${OIDC_ISSUER:-https://auth.kalke.dev/realms/kalke}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-personal-document-extractor}
+      AUTH_INTROSPECT_URL: ${AUTH_INTROSPECT_URL:-https://auth.kalke.dev/v1/introspect}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://kalke.dev,https://www.kalke.dev}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8}
+    expose:
+      - "8080"
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    networks:
+      - kalke-auth
+
+networks:
+  kalke-auth:
+    external: true
+    name: kalke-auth_default

@@ -274,3 +274,27 @@ smoke-m2m: ## M2M JWT smoke: client_credentials → POST /v1/extract without fil
 .PHONY: clean
 clean: ## Remove local build artifacts
 	rm -rf bin/ dist/ tmp/ .tmp/ coverage.out
+
+COMPOSE_AWS ?= docker compose -f docker-compose.aws.yml
+
+.PHONY: aws-up
+aws-up: ## Prod on AWS EC2: build + start API on kalke-auth network
+	@test -f prod.env || { echo "prod.env missing — copy prod.env.example and fill secrets"; exit 1; }
+	@docker network inspect kalke-auth_default >/dev/null 2>&1 || { \
+		echo "Missing Docker network kalke-auth_default. Start kalke-auth first (make aws-up there)."; \
+		exit 1; \
+	}
+	$(COMPOSE_AWS) up --build -d --wait
+	@docker image prune -f >/dev/null 2>&1 || true
+
+.PHONY: aws-down
+aws-down: ## Stop AWS PDE API
+	$(COMPOSE_AWS) down
+
+.PHONY: aws-ps
+aws-ps: ## Show AWS PDE status
+	$(COMPOSE_AWS) ps
+
+.PHONY: aws-logs
+aws-logs: ## Tail AWS PDE logs
+	$(COMPOSE_AWS) logs -f --tail=200
