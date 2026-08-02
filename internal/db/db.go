@@ -52,12 +52,12 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 	// session SET between transactions. Re-apply on every checkout.
 	quoted := pgx.Identifier{path}.Sanitize()
 	setSQL := "SET search_path TO " + quoted + ", public"
-	cfg.BeforeAcquire = func(ctx context.Context, conn *pgx.Conn) bool {
+	cfg.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
 		if _, err := conn.Exec(ctx, setSQL); err != nil {
 			slog.Error("set search_path failed", "err", err, "schema", path)
-			return false
+			return false, err
 		}
-		return true
+		return true, nil
 	}
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		_, err := conn.Exec(ctx, setSQL)
