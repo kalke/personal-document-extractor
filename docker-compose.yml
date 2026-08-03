@@ -19,8 +19,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
+    # No host publish — avoids clashing with a local Redis on :6379.
+    # API reaches it as redis:6379 on the compose network.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -58,6 +58,9 @@ services:
       OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:-http://caddy:8443/realms/kalke}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,https://kalke.dev,https://www.kalke.dev}
+      AUTH_INTROSPECT_URL: ${AUTH_INTROSPECT_URL:-http://bff:8080/v1/introspect}
+      INTROSPECT_SECRET: ${INTROSPECT_SECRET:-local-dev-introspect-secret}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 5s
