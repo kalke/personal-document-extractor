@@ -18,6 +18,7 @@ import (
 	"github.com/kalke/personal-document-extractor/internal/config"
 	"github.com/kalke/personal-document-extractor/internal/db"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/address_proof"
+	"github.com/kalke/personal-document-extractor/internal/doctypes/curriculum_vitae"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/identity_document"
 	"github.com/kalke/personal-document-extractor/internal/doctypes/invoice_nf"
 	"github.com/kalke/personal-document-extractor/internal/extract"
@@ -64,6 +65,7 @@ func main() {
 	svc := extract.NewService(
 		llm,
 		address_proof.DocType{},
+		curriculum_vitae.DocType{},
 		identity_document.DocType{},
 		invoice_nf.DocType{},
 	)

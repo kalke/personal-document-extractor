@@ -110,6 +110,7 @@ Supported `doc_type` values:
 | `identity_document` | RG / CNH (including CNH-e) |
 | `address_proof` | Comprovante de endereço |
 | `invoice_nf` | NFe / NFSe (simplified) |
+| `curriculum_vitae` | CV / resume (PT or EN) |
 
 Uploads: PDF, JPEG, PNG, WebP (max **32 MiB**). MIME is sniffed from bytes; spoofed headers and extension mismatches are rejected.
 

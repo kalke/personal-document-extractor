@@ -239,7 +239,7 @@ components:
 
     DocType:
       type: string
-      enum: [identity_document, address_proof, invoice_nf]
+      enum: [identity_document, address_proof, invoice_nf, curriculum_vitae]
 
     ErrorBody:
       type: object
