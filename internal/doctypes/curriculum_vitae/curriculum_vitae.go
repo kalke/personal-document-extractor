@@ -48,9 +48,10 @@ type SkillGroup struct {
 }
 
 // Skills is a categorized skill list. JSON may be:
-//   [{"category":"frontend","items":["React"]}, ...]
-//   {"frontend":["React"],"backend":["Go"]}
-//   ["React","Go"]  (legacy flat list → category "other")
+//
+//	[{"category":"frontend","items":["React"]}, ...]
+//	{"frontend":["React"],"backend":["Go"]}
+//	["React","Go"]  (legacy flat list → category "other")
 type Skills []SkillGroup
 
 type Result struct {
@@ -165,7 +166,7 @@ func (s *Skills) UnmarshalJSON(data []byte) error {
 	switch data[0] {
 	case '[':
 		var groups []SkillGroup
-		if err := json.Unmarshal(data, &groups); err == nil && looksLikeSkillGroups(groups) {
+		if err := json.Unmarshal(data, &groups); err == nil {
 			*s = groups
 			return nil
 		}
@@ -193,19 +194,6 @@ func (s *Skills) UnmarshalJSON(data []byte) error {
 
 func bytesTrimSpace(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
-}
-
-func looksLikeSkillGroups(groups []SkillGroup) bool {
-	if len(groups) == 0 {
-		return true
-	}
-	for _, g := range groups {
-		if g.Category != "" || len(g.Items) > 0 {
-			return true
-		}
-	}
-	// Empty objects in array — treat as groups form anyway.
-	return true
 }
 
 var skillCategoryOrder = []string{

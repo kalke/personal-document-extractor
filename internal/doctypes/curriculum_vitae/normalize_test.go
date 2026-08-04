@@ -23,11 +23,11 @@ func TestNormalize(t *testing.T) {
 		},
 		Experience: []curriculum_vitae.Experience{
 			{
-				Company:   " Acme ",
-				Title:     " Engineer ",
-				StartDate: "01/2020",
-				EndDate:   &end,
-				Current:   false,
+				Company:    " Acme ",
+				Title:      " Engineer ",
+				StartDate:  "01/2020",
+				EndDate:    &end,
+				Current:    false,
 				Highlights: []string{" Built APIs ", ""},
 			},
 			{Company: "", Title: ""},

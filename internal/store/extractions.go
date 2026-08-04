@@ -204,4 +204,3 @@ func (s *Extractions) GetByIDForSubject(ctx context.Context, id, subject string)
 	}
 	return item, nil
 }
-

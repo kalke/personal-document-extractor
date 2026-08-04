@@ -84,13 +84,13 @@ func main() {
 	limiter := ratelimit.New(redisCache.Redis(), cfg.RateLimitPerMinute)
 
 	handler, err := httpapi.New(httpapi.Deps{
-		Extractor:      svc,
-		Pool:           pool,
-		Cache:          redisCache,
-		Extractions:    store.NewExtractions(pool),
-		Consents:       store.NewConsents(pool),
-		TrustedProxies: cfg.TrustedProxies,
-		CORSOrigins:    cfg.CORSOrigins,
+		Extractor:            svc,
+		Pool:                 pool,
+		Cache:                redisCache,
+		Extractions:          store.NewExtractions(pool),
+		Consents:             store.NewConsents(pool),
+		TrustedProxies:       cfg.TrustedProxies,
+		CORSOrigins:          cfg.CORSOrigins,
 		Auth:                 authenticator,
 		RateLimit:            limiter,
 		AdminEmails:          cfg.AdminEmails,

@@ -34,16 +34,16 @@ const (
 )
 
 type Server struct {
-	extractor             Extractor
-	pool                  DBPinger
-	cache                 ResultCache
-	extractions           ExtractionStore
-	consents              ConsentStore
-	trustedProxies        []*net.IPNet
-	corsOrigins           []string
-	auth                  Authenticator
-	limiter               RateLimiter
-	m2mUserForwardSecret  string
+	extractor            Extractor
+	pool                 DBPinger
+	cache                ResultCache
+	extractions          ExtractionStore
+	consents             ConsentStore
+	trustedProxies       []*net.IPNet
+	corsOrigins          []string
+	auth                 Authenticator
+	limiter              RateLimiter
+	m2mUserForwardSecret string
 }
 
 func New(deps Deps) (http.Handler, error) {
@@ -60,7 +60,7 @@ func New(deps Deps) (http.Handler, error) {
 		extractor:            deps.Extractor,
 		pool:                 deps.Pool,
 		cache:                deps.Cache,
-		extractions:           deps.Extractions,
+		extractions:          deps.Extractions,
 		consents:             deps.Consents,
 		trustedProxies:       deps.TrustedProxies,
 		corsOrigins:          deps.CORSOrigins,
@@ -384,10 +384,7 @@ func (s *Server) acceptsUserForward(r *http.Request) bool {
 		return false
 	}
 	want := s.m2mUserForwardSecret
-	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
-		return true
-	}
-	return false
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func isM2MPrincipal(p auth.Principal) bool {

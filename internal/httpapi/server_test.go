@@ -727,7 +727,7 @@ func TestExtractionsIDORBlockedBetweenUsers(t *testing.T) {
 
 	h := mustHandler(t, httpapi.Deps{
 		Extractor:   &stubExtractor{},
-		Extractions:  st,
+		Extractions: st,
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			tokenA: {Subject: subA, Client: "kalke-cli", Email: "a@ex.com", Kind: auth.KindJWT, Scopes: []string{auth.ScopeExtractWrite}},
 			tokenB: {Subject: subB, Client: "kalke-cli", Email: "b@ex.com", Kind: auth.KindJWT, Scopes: []string{auth.ScopeExtractWrite}},
@@ -792,7 +792,7 @@ func TestM2MUserForwardRequiresSharedSecret(t *testing.T) {
 
 	h := mustHandler(t, httpapi.Deps{
 		Extractor:            &stubExtractor{},
-		Extractions:           st,
+		Extractions:          st,
 		M2MUserForwardSecret: fwdSec,
 		Auth: &stubAuth{principals: map[string]auth.Principal{
 			m2mToken: {
