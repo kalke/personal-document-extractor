@@ -26,6 +26,8 @@ type ResultCache interface {
 type ExtractionStore interface {
 	Insert(ctx context.Context, rec store.ExtractionRecord) error
 	Replace(ctx context.Context, rec store.ExtractionRecord) error
+	ListBySubject(ctx context.Context, subject, docType string, limit int) ([]store.ExtractionSummary, error)
+	GetByIDForSubject(ctx context.Context, id, subject string) (store.ExtractionSummary, error)
 }
 
 type ConsentStore interface {

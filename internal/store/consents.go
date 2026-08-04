@@ -10,6 +10,17 @@ import (
 
 const PolicyLGPDExtractV1 = "lgpd-extract-v1"
 
+// PolicyLGPDCVStoreV1 covers curriculum vitae extracts where structured results
+// are retained and linked to the user account (raw files are still not stored).
+const PolicyLGPDCVStoreV1 = "lgpd-cv-store-v1"
+
+func RequiredConsentPolicy(docType string) string {
+	if docType == "curriculum_vitae" {
+		return PolicyLGPDCVStoreV1
+	}
+	return PolicyLGPDExtractV1
+}
+
 type Consents struct {
 	pool *pgxpool.Pool
 }

@@ -107,6 +107,39 @@ func (m *memoryStore) Replace(_ context.Context, rec store.ExtractionRecord) err
 	return m.save(rec, true)
 }
 
+func (m *memoryStore) ListBySubject(_ context.Context, subject, docType string, limit int) ([]store.ExtractionSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]store.ExtractionSummary, 0)
+	for i := len(m.rows) - 1; i >= 0; i-- {
+		rec := m.rows[i]
+		if rec.AuthSubject != subject {
+			continue
+		}
+		if docType != "" && rec.DocType != docType {
+			continue
+		}
+		payload, _ := json.Marshal(rec.Result)
+		out = append(out, store.ExtractionSummary{
+			ID:            "mem",
+			CreatedAt:     time.Now().UTC(),
+			DocType:       rec.DocType,
+			Filename:      rec.Filename,
+			ContentSHA256: rec.ContentSHA256,
+			Status:        rec.Status,
+			Result:        payload,
+		})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *memoryStore) GetByIDForSubject(context.Context, string, string) (store.ExtractionSummary, error) {
+	return store.ExtractionSummary{}, store.ErrNotFound
+}
+
 func (m *memoryStore) save(rec store.ExtractionRecord, replace bool) error {
 	if m.err != nil {
 		return m.err
@@ -468,8 +501,8 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if _, ok := hit["meta"]; ok {
 		t.Fatalf("meta must not be exposed on hit: %v", hit)
 	}
-	if ex.callCount() != 1 || st.len() != 1 {
-		t.Fatalf("cache hit should not extract/persist again; calls=%d rows=%d", ex.callCount(), st.len())
+	if ex.callCount() != 1 || st.len() != 2 {
+		t.Fatalf("cache hit should not re-extract but still persist for the actor; calls=%d rows=%d", ex.callCount(), st.len())
 	}
 }
 
@@ -540,7 +573,7 @@ func TestExtractRefreshBypassesCacheAndReplaces(t *testing.T) {
 	if ex.callCount() != 2 {
 		t.Fatalf("refresh should re-extract; calls=%d", ex.callCount())
 	}
-	if st.len() != 2 || st.replaceCount() != 1 {
+	if st.len() != 3 || st.replaceCount() != 1 {
 		t.Fatalf("rows=%d replaced=%d", st.len(), st.replaceCount())
 	}
 	var body map[string]any

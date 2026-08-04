@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/kalke/personal-document-extractor/internal/extract"
 )
+
+var ErrNotFound = errors.New("not found")
 
 type Extractions struct {
 	pool *pgxpool.Pool
@@ -111,3 +115,93 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 	}
 	return nil
 }
+
+// ExtractionSummary is a stored extract returned to the owning user.
+type ExtractionSummary struct {
+	ID            string          `json:"id"`
+	CreatedAt     time.Time       `json:"created_at"`
+	DocType       string          `json:"doc_type"`
+	Filename      string          `json:"filename,omitempty"`
+	ContentSHA256 string          `json:"content_sha256"`
+	Status        string          `json:"status"`
+	Result        json.RawMessage `json:"result"`
+}
+
+func (s *Extractions) ListBySubject(ctx context.Context, subject, docType string, limit int) ([]ExtractionSummary, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("store not configured")
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, fmt.Errorf("subject required")
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, created_at, doc_type, COALESCE(filename, ''), content_sha256, status, result_json
+		FROM extractions
+		WHERE auth_subject = $1
+		  AND deleted_at IS NULL
+		  AND ($2 = '' OR doc_type = $2)
+		ORDER BY created_at DESC
+		LIMIT $3
+	`, subject, docType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list extractions: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]ExtractionSummary, 0)
+	for rows.Next() {
+		var item ExtractionSummary
+		if err := rows.Scan(
+			&item.ID,
+			&item.CreatedAt,
+			&item.DocType,
+			&item.Filename,
+			&item.ContentSHA256,
+			&item.Status,
+			&item.Result,
+		); err != nil {
+			return nil, fmt.Errorf("scan extraction: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Extractions) GetByIDForSubject(ctx context.Context, id, subject string) (ExtractionSummary, error) {
+	if s == nil || s.pool == nil {
+		return ExtractionSummary{}, fmt.Errorf("store not configured")
+	}
+	id = strings.TrimSpace(id)
+	subject = strings.TrimSpace(subject)
+	if id == "" || subject == "" {
+		return ExtractionSummary{}, fmt.Errorf("id and subject required")
+	}
+	var item ExtractionSummary
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, created_at, doc_type, COALESCE(filename, ''), content_sha256, status, result_json
+		FROM extractions
+		WHERE id = $1::uuid
+		  AND auth_subject = $2
+		  AND deleted_at IS NULL
+	`, id, subject).Scan(
+		&item.ID,
+		&item.CreatedAt,
+		&item.DocType,
+		&item.Filename,
+		&item.ContentSHA256,
+		&item.Status,
+		&item.Result,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExtractionSummary{}, ErrNotFound
+		}
+		return ExtractionSummary{}, fmt.Errorf("get extraction: %w", err)
+	}
+	return item, nil
+}
+

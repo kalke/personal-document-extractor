@@ -27,9 +27,9 @@ const (
 	persistTimeout    = 3 * time.Second
 	readyPingTimeout  = 2 * time.Second
 	multipartOverhead = 1 << 20
+	headerUserSub     = "X-Kalke-User-Sub"
+	headerUserEmail   = "X-Kalke-User-Email"
 )
-
-const consentPolicyVersion = store.PolicyLGPDExtractV1
 
 type Server struct {
 	extractor      Extractor
@@ -75,6 +75,8 @@ func New(deps Deps) (http.Handler, error) {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.authenticate)
 		r.Post("/extract", s.extract)
+		r.Get("/extractions", s.listExtractions)
+		r.Get("/extractions/{id}", s.getExtraction)
 	})
 	return r, nil
 }
@@ -134,19 +136,20 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, err)
 		return
 	}
-	if !consentAccepted(r) {
-		writeErr(w, http.StatusBadRequest, "lgpd consent required (consent="+consentPolicyVersion+")")
+	if !consentAccepted(r, docType) {
+		policy := store.RequiredConsentPolicy(docType)
+		writeErr(w, http.StatusBadRequest, "lgpd consent required (consent="+policy+")")
 		return
 	}
 
 	// Cheap validation (MIME/extension) before cache — do NOT rasterize PDFs yet.
-	if _, _, err := preprocess.ValidateUpload(filename, data); err != nil {
+	_, detectedMIME, err := preprocess.ValidateUpload(filename, data)
+	if err != nil {
 		status, msg := mapPreprocessError(err)
 		log.Warn("upload validation failed", "err", err, "doc_type", docType, "status", status)
 		writeErr(w, status, msg)
 		return
 	}
-
 	sum := sha256.Sum256(data)
 	shaHex := hex.EncodeToString(sum[:])
 	clientIP, userAgent := s.requestOrigin(r)
@@ -157,18 +160,13 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		"client_ip", clientIP,
 	)
 
-	var authSubject, authClient, authEmail string
-	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
-		authSubject = p.Subject
-		authClient = p.Client
-		authEmail = p.Email
-	}
+	authSubject, authClient, authEmail := resolveActor(r)
 	s.recordConsent(r.Context(), store.ConsentRecord{
 		UserSub:       authSubject,
 		UserEmail:     authEmail,
 		IP:            clientIP,
 		UserAgent:     userAgent,
-		PolicyVersion: consentPolicyVersion,
+		PolicyVersion: store.RequiredConsentPolicy(docType),
 		ContentSHA256: shaHex,
 		DocType:       docType,
 		AcceptedAt:    time.Now().UTC(),
@@ -176,6 +174,25 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 
 	if !refresh {
 		if cached, ok := s.lookupCache(r.Context(), docType, shaHex); ok {
+			cached.Meta.ContentSHA256 = shaHex
+			cached.Meta.Cache = "hit"
+			// Still attribute a stored copy to this user (esp. CV history) without burning LLM quota.
+			s.persist(persistArgs{
+				reqID:       reqID,
+				docType:     docType,
+				shaHex:      shaHex,
+				filename:    filename,
+				doc:         preprocess.PreparedDocument{MIME: detectedMIME, Filename: filename},
+				result:      cached,
+				duration:    time.Since(start),
+				refresh:     false,
+				clientIP:    clientIP,
+				userAgent:   userAgent,
+				authSubject: authSubject,
+				authClient:  authClient,
+				authEmail:   authEmail,
+				log:         log,
+			})
 			log.Info("extract", "cache", "hit")
 			writeJSON(w, http.StatusOK, toExtractResponse(cached))
 			return
@@ -311,18 +328,99 @@ func truthyQuery(r *http.Request, key string) bool {
 	}
 }
 
-func consentAccepted(r *http.Request) bool {
+func consentAccepted(r *http.Request, docType string) bool {
 	v := strings.TrimSpace(r.FormValue("consent"))
 	if v == "" {
 		v = strings.TrimSpace(r.Header.Get("X-LGPD-Consent"))
 	}
-	v = strings.ToLower(v)
-	switch v {
-	case consentPolicyVersion, "1", "true", "yes", "y", "on":
+	required := store.RequiredConsentPolicy(docType)
+	if strings.EqualFold(v, required) {
 		return true
-	default:
+	}
+	// Legacy boolean-ish values only for the original extract policy.
+	if required == store.PolicyLGPDExtractV1 {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		}
+	}
+	return false
+}
+
+// resolveActor attributes persistence/consent to the end user when the Auth BFF
+// calls with an M2M token and forwards X-Kalke-User-*.
+func resolveActor(r *http.Request) (subject, client, email string) {
+	p, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		return "", "", ""
+	}
+	subject, client, email = p.Subject, p.Client, p.Email
+	if !isM2MPrincipal(p) {
+		return subject, client, email
+	}
+	if sub := strings.TrimSpace(r.Header.Get(headerUserSub)); sub != "" {
+		subject = sub
+		if em := strings.TrimSpace(r.Header.Get(headerUserEmail)); em != "" {
+			email = em
+		}
+	}
+	return subject, client, email
+}
+
+func isM2MPrincipal(p auth.Principal) bool {
+	if p.Kind != auth.KindJWT {
 		return false
 	}
+	if p.Client == "pde-m2m" {
+		return true
+	}
+	// Service-account tokens usually have no email.
+	return p.Email == "" && strings.HasPrefix(p.Client, "pde-")
+}
+
+func (s *Server) listExtractions(w http.ResponseWriter, r *http.Request) {
+	if s.extractions == nil {
+		writeErr(w, http.StatusServiceUnavailable, "extractions unavailable")
+		return
+	}
+	subject, _, _ := resolveActor(r)
+	if subject == "" {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	docType := strings.TrimSpace(r.URL.Query().Get("doc_type"))
+	limit := 20
+	items, err := s.extractions.ListBySubject(r.Context(), subject, docType, limit)
+	if err != nil {
+		slog.Error("list extractions", "err", err, "subject", subject)
+		writeErr(w, http.StatusInternalServerError, "list failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"extractions": items})
+}
+
+func (s *Server) getExtraction(w http.ResponseWriter, r *http.Request) {
+	if s.extractions == nil {
+		writeErr(w, http.StatusServiceUnavailable, "extractions unavailable")
+		return
+	}
+	subject, _, _ := resolveActor(r)
+	if subject == "" {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	item, err := s.extractions.GetByIDForSubject(r.Context(), id, subject)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		slog.Error("get extraction", "err", err, "id", id)
+		writeErr(w, http.StatusInternalServerError, "get failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *Server) recordConsent(ctx context.Context, rec store.ConsentRecord, log *slog.Logger) {
@@ -395,6 +493,13 @@ func mapPreprocessError(err error) (int, string) {
 }
 
 func mapExtractError(err error) (int, string) {
+	msg := err.Error()
+	if strings.Contains(msg, "groq http 429") || strings.Contains(msg, "Rate limit reached") {
+		return http.StatusTooManyRequests, "extraction provider busy; try again in a minute"
+	}
+	if strings.Contains(msg, "groq http 413") || strings.Contains(msg, "Request too large") {
+		return http.StatusRequestEntityTooLarge, "document too large for extraction provider; try a shorter CV or fewer pages"
+	}
 	switch {
 	case errors.Is(err, extract.ErrUnknownDocType):
 		return http.StatusBadRequest, "unknown doc_type"
