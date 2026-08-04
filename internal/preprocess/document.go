@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,14 @@ type Image struct {
 	MIME string
 	Data []byte
 }
+
+const (
+	// Prefer text when a PDF already has a usable text layer (typical for digital CVs).
+	minPDFTextChars = 200
+	// Cap prompt text so prompt+completion stay under free-tier Groq TPM budgets.
+	maxPDFTextChars = 12_000
+	maxVisionPages  = 2
+)
 
 func Prepare(filename string, data []byte) (PreparedDocument, error) {
 	kind, mime, err := ValidateUpload(filename, data)
@@ -45,10 +54,24 @@ func Prepare(filename string, data []byte) (PreparedDocument, error) {
 		return doc, nil
 
 	case KindPDF:
+		text, textErr := TextFromPDF(data, defaultMaxPages)
+		if textErr == nil {
+			trimmed := strings.TrimSpace(text)
+			if len(trimmed) >= minPDFTextChars {
+				if len(trimmed) > maxPDFTextChars {
+					trimmed = trimmed[:maxPDFTextChars]
+				}
+				doc.Text = trimmed
+				doc.Mode = "text"
+				slog.Debug("preprocess ready", "kind", "pdf", "mode", doc.Mode, "text_chars", len(doc.Text))
+				return doc, nil
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
-		pages, renderErr := PDFPagesToJPEG(ctx, data, defaultMaxPages)
+		pages, renderErr := PDFPagesToJPEG(ctx, data, maxVisionPages)
 		if renderErr == nil && len(pages) > 0 {
 			for _, p := range pages {
 				compacted, outMIME, err := CompactImage(p)
@@ -62,7 +85,6 @@ func Prepare(filename string, data []byte) (PreparedDocument, error) {
 			return doc, nil
 		}
 
-		text, textErr := TextFromPDF(data, defaultMaxPages)
 		if textErr != nil {
 			if renderErr != nil {
 				return doc, fmt.Errorf("pdf has no usable text and render failed: %w", renderErr)
@@ -70,9 +92,16 @@ func Prepare(filename string, data []byte) (PreparedDocument, error) {
 			return doc, fmt.Errorf("pdf text extract failed: %w", textErr)
 		}
 		if renderErr != nil {
-			slog.Warn("pdf render failed; falling back to text", "err", renderErr)
+			slog.Warn("pdf render failed; falling back to short text", "err", renderErr)
 		}
-		doc.Text = text
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return doc, fmt.Errorf("pdf has no usable text and render failed: %w", renderErr)
+		}
+		if len(trimmed) > maxPDFTextChars {
+			trimmed = trimmed[:maxPDFTextChars]
+		}
+		doc.Text = trimmed
 		doc.Mode = "text"
 		return doc, nil
 
