@@ -32,6 +32,9 @@ type Config struct {
 	IntrospectSecret   string
 	AdminEmails        []string
 	RateLimitPerMinute int
+	// M2MUserForwardSecret gates X-Kalke-User-* forwarding from the Auth BFF.
+	// Empty means those headers are never trusted (fail closed).
+	M2MUserForwardSecret string
 }
 
 func Load() (Config, error) {
@@ -106,8 +109,9 @@ func Load() (Config, error) {
 		OIDCDiscoveryURL:   strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
 		AuthIntrospectURL:  strings.TrimSpace(os.Getenv("AUTH_INTROSPECT_URL")),
 		IntrospectSecret:   strings.TrimSpace(os.Getenv("INTROSPECT_SECRET")),
-		AdminEmails:        adminEmails,
-		RateLimitPerMinute: rateLimit,
+		AdminEmails:          adminEmails,
+		RateLimitPerMinute:   rateLimit,
+		M2MUserForwardSecret: strings.TrimSpace(os.Getenv("M2M_USER_FORWARD_SECRET")),
 	}
 	if cfg.GroqAPIKey == "" {
 		return Config{}, fmt.Errorf("GROQ_API_KEY is required")

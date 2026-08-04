@@ -71,7 +71,7 @@ func (s *Server) enforceLLMRateLimit(w http.ResponseWriter, r *http.Request) boo
 	}
 	id := p.Subject
 	// Attribute playground quota to the end user when BFF forwards identity.
-	if isM2MPrincipal(p) {
+	if isM2MPrincipal(p) && s.acceptsUserForward(r) {
 		if sub := strings.TrimSpace(r.Header.Get(headerUserSub)); sub != "" {
 			id = sub
 		}

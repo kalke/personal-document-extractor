@@ -47,14 +47,15 @@ type RateLimiter interface {
 }
 
 type Deps struct {
-	Extractor      Extractor
-	Pool           DBPinger
-	Cache          ResultCache
-	Extractions    ExtractionStore
-	Consents       ConsentStore
-	TrustedProxies []*net.IPNet
-	CORSOrigins    []string
-	Auth           Authenticator
-	RateLimit      RateLimiter
-	AdminEmails    []string // optional; reserved for future admin-only routes
+	Extractor             Extractor
+	Pool                  DBPinger
+	Cache                 ResultCache
+	Extractions            ExtractionStore
+	Consents              ConsentStore
+	TrustedProxies        []*net.IPNet
+	CORSOrigins           []string
+	Auth                  Authenticator
+	RateLimit             RateLimiter
+	AdminEmails           []string // optional; reserved for future admin-only routes
+	M2MUserForwardSecret  string   // shared with Auth BFF; required to honor X-Kalke-User-*
 }

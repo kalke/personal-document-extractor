@@ -61,6 +61,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,https://kalke.dev,https://www.kalke.dev}
       AUTH_INTROSPECT_URL: ${AUTH_INTROSPECT_URL:-http://bff:8080/v1/introspect}
       INTROSPECT_SECRET: ${INTROSPECT_SECRET:-local-dev-introspect-secret}
+      M2M_USER_FORWARD_SECRET: ${M2M_USER_FORWARD_SECRET:-local-dev-m2m-forward-secret}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 5s

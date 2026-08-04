@@ -91,13 +91,17 @@ func main() {
 		Consents:       store.NewConsents(pool),
 		TrustedProxies: cfg.TrustedProxies,
 		CORSOrigins:    cfg.CORSOrigins,
-		Auth:           authenticator,
-		RateLimit:      limiter,
-		AdminEmails:    cfg.AdminEmails,
+		Auth:                 authenticator,
+		RateLimit:            limiter,
+		AdminEmails:          cfg.AdminEmails,
+		M2MUserForwardSecret: cfg.M2MUserForwardSecret,
 	})
 	if err != nil {
 		slog.Error("httpapi", "err", err)
 		os.Exit(1)
+	}
+	if cfg.M2MUserForwardSecret == "" {
+		slog.Warn("M2M_USER_FORWARD_SECRET unset; X-Kalke-User-* headers will be ignored")
 	}
 
 	addr := ":" + cfg.Port

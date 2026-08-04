@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -94,9 +95,15 @@ func (s stubDB) Ping(context.Context) error { return s.err }
 
 type memoryStore struct {
 	mu       sync.Mutex
-	rows     []store.ExtractionRecord
+	rows     []memoryRow
 	replaced int
 	err      error
+	seq      int
+}
+
+type memoryRow struct {
+	id  string
+	rec store.ExtractionRecord
 }
 
 func (m *memoryStore) Insert(_ context.Context, rec store.ExtractionRecord) error {
@@ -112,21 +119,21 @@ func (m *memoryStore) ListBySubject(_ context.Context, subject, docType string, 
 	defer m.mu.Unlock()
 	out := make([]store.ExtractionSummary, 0)
 	for i := len(m.rows) - 1; i >= 0; i-- {
-		rec := m.rows[i]
-		if rec.AuthSubject != subject {
+		row := m.rows[i]
+		if row.rec.AuthSubject != subject {
 			continue
 		}
-		if docType != "" && rec.DocType != docType {
+		if docType != "" && row.rec.DocType != docType {
 			continue
 		}
-		payload, _ := json.Marshal(rec.Result)
+		payload, _ := json.Marshal(row.rec.Result)
 		out = append(out, store.ExtractionSummary{
-			ID:            "mem",
+			ID:            row.id,
 			CreatedAt:     time.Now().UTC(),
-			DocType:       rec.DocType,
-			Filename:      rec.Filename,
-			ContentSHA256: rec.ContentSHA256,
-			Status:        rec.Status,
+			DocType:       row.rec.DocType,
+			Filename:      row.rec.Filename,
+			ContentSHA256: row.rec.ContentSHA256,
+			Status:        row.rec.Status,
 			Result:        payload,
 		})
 		if limit > 0 && len(out) >= limit {
@@ -136,7 +143,27 @@ func (m *memoryStore) ListBySubject(_ context.Context, subject, docType string, 
 	return out, nil
 }
 
-func (m *memoryStore) GetByIDForSubject(context.Context, string, string) (store.ExtractionSummary, error) {
+func (m *memoryStore) GetByIDForSubject(_ context.Context, id, subject string) (store.ExtractionSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, row := range m.rows {
+		if row.id != id {
+			continue
+		}
+		if row.rec.AuthSubject != subject {
+			return store.ExtractionSummary{}, store.ErrNotFound
+		}
+		payload, _ := json.Marshal(row.rec.Result)
+		return store.ExtractionSummary{
+			ID:            row.id,
+			CreatedAt:     time.Now().UTC(),
+			DocType:       row.rec.DocType,
+			Filename:      row.rec.Filename,
+			ContentSHA256: row.rec.ContentSHA256,
+			Status:        row.rec.Status,
+			Result:        payload,
+		}, nil
+	}
 	return store.ExtractionSummary{}, store.ErrNotFound
 }
 
@@ -149,7 +176,11 @@ func (m *memoryStore) save(rec store.ExtractionRecord, replace bool) error {
 	if replace {
 		m.replaced++
 	}
-	m.rows = append(m.rows, rec)
+	m.seq++
+	m.rows = append(m.rows, memoryRow{
+		id:  fmt.Sprintf("mem-%d", m.seq),
+		rec: rec,
+	})
 	return nil
 }
 
@@ -479,14 +510,14 @@ func TestExtractCacheHitAndMiss(t *testing.T) {
 	if ex.callCount() != 1 || st.len() != 1 {
 		t.Fatalf("calls=%d rows=%d", ex.callCount(), st.len())
 	}
-	if st.rows[0].ClientIP == "" {
+	if st.rows[0].rec.ClientIP == "" {
 		t.Fatal("expected client_ip persisted")
 	}
-	if st.rows[0].AuthSubject == "" {
-		t.Fatalf("expected auth_subject persisted: %+v", st.rows[0])
+	if st.rows[0].rec.AuthSubject == "" {
+		t.Fatalf("expected auth_subject persisted: %+v", st.rows[0].rec)
 	}
-	if st.rows[0].AuthClient != "kalke-cli" || st.rows[0].AuthEmail != testAdminEmail {
-		t.Fatalf("expected auth_client/email persisted: %+v", st.rows[0])
+	if st.rows[0].rec.AuthClient != "kalke-cli" || st.rows[0].rec.AuthEmail != testAdminEmail {
+		t.Fatalf("expected auth_client/email persisted: %+v", st.rows[0].rec)
 	}
 
 	rec = httptest.NewRecorder()
@@ -671,6 +702,139 @@ func multipartRequestOpt(t *testing.T, url, filename string, data []byte, withCo
 	req.Header.Set("User-Agent", "extract-test/1.0")
 	req.Header.Set("Authorization", "Bearer "+testBearer)
 	return req
+}
+
+func TestExtractionsIDORBlockedBetweenUsers(t *testing.T) {
+	const (
+		tokenA = "token-a"
+		tokenB = "token-b"
+		subA   = "user-a"
+		subB   = "user-b"
+	)
+	st := &memoryStore{}
+	_ = st.Insert(context.Background(), store.ExtractionRecord{
+		DocType:       "curriculum_vitae",
+		ContentSHA256: "abc",
+		Filename:      "a.pdf",
+		AuthSubject:   subA,
+		Status:        "success",
+		Result: extract.Result{
+			DocType: "curriculum_vitae",
+			Data:    map[string]any{"full_name": "Secret Alice"},
+		},
+	})
+	ownerID := st.rows[0].id
+
+	h := mustHandler(t, httpapi.Deps{
+		Extractor:   &stubExtractor{},
+		Extractions:  st,
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			tokenA: {Subject: subA, Client: "kalke-cli", Email: "a@ex.com", Kind: auth.KindJWT, Scopes: []string{auth.ScopeExtractWrite}},
+			tokenB: {Subject: subB, Client: "kalke-cli", Email: "b@ex.com", Kind: auth.KindJWT, Scopes: []string{auth.ScopeExtractWrite}},
+		}},
+	})
+
+	// Owner can read.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/extractions/"+ownerID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner get status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// Other user cannot read by id.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/extractions/"+ownerID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenB)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("idor get status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// Other user list does not include owner row.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/extractions?doc_type=curriculum_vitae", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenB)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status %d", rec.Code)
+	}
+	var body struct {
+		Extractions []store.ExtractionSummary `json:"extractions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Extractions) != 0 {
+		t.Fatalf("expected empty list for other user, got %#v", body.Extractions)
+	}
+}
+
+func TestM2MUserForwardRequiresSharedSecret(t *testing.T) {
+	const (
+		m2mToken = "m2m-token"
+		fwdSec   = "forward-secret"
+		victim   = "victim-sub"
+	)
+	st := &memoryStore{}
+	_ = st.Insert(context.Background(), store.ExtractionRecord{
+		DocType:       "curriculum_vitae",
+		ContentSHA256: "xyz",
+		Filename:      "v.pdf",
+		AuthSubject:   victim,
+		Status:        "success",
+		Result: extract.Result{
+			DocType: "curriculum_vitae",
+			Data:    map[string]any{"full_name": "Victim"},
+		},
+	})
+
+	h := mustHandler(t, httpapi.Deps{
+		Extractor:            &stubExtractor{},
+		Extractions:           st,
+		M2MUserForwardSecret: fwdSec,
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			m2mToken: {
+				Subject: "service-account-pde-m2m",
+				Client:  "pde-m2m",
+				Email:   "",
+				Kind:    auth.KindJWT,
+				Scopes:  []string{auth.ScopeExtractWrite},
+			},
+		}},
+	})
+
+	listAs := func(withSecret bool) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/extractions?doc_type=curriculum_vitae", nil)
+		req.Header.Set("Authorization", "Bearer "+m2mToken)
+		req.Header.Set("X-Kalke-User-Sub", victim)
+		req.Header.Set("X-Kalke-User-Email", "v@ex.com")
+		if withSecret {
+			req.Header.Set("X-Kalke-Forward-Secret", fwdSec)
+		} else {
+			req.Header.Set("X-Kalke-Forward-Secret", "wrong")
+		}
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status %d secret=%v body %s", rec.Code, withSecret, rec.Body.String())
+		}
+		var body struct {
+			Extractions []store.ExtractionSummary `json:"extractions"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return len(body.Extractions)
+	}
+
+	if n := listAs(false); n != 0 {
+		t.Fatalf("forged headers without valid secret must not see victim CVs; got %d", n)
+	}
+	if n := listAs(true); n != 1 {
+		t.Fatalf("BFF with shared secret should see victim CVs; got %d", n)
+	}
 }
 
 func tinyPNG(t *testing.T) []byte {

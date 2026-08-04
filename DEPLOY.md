@@ -16,6 +16,7 @@ Production API runs on the **same AWS EC2** as `kalke-auth` (Neon + Upstash), be
 
 - `DATABASE_URL`, `REDIS_ADDR`, `REDIS_PASSWORD`
 - `OIDC_ISSUER`, `INTROSPECT_SECRET`, `GROQ_API_KEY`
+- `M2M_USER_FORWARD_SECRET` (shared with Auth BFF `PDE_USER_FORWARD_SECRET`)
 - (optional, for future CF Containers) `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
 Deploy writes `~/personal-document-extractor/prod.env` from these secrets, then `make aws-up`.

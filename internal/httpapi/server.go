@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,18 +30,20 @@ const (
 	multipartOverhead = 1 << 20
 	headerUserSub     = "X-Kalke-User-Sub"
 	headerUserEmail   = "X-Kalke-User-Email"
+	headerForwardSec  = "X-Kalke-Forward-Secret"
 )
 
 type Server struct {
-	extractor      Extractor
-	pool           DBPinger
-	cache          ResultCache
-	extractions    ExtractionStore
-	consents       ConsentStore
-	trustedProxies []*net.IPNet
-	corsOrigins    []string
-	auth           Authenticator
-	limiter        RateLimiter
+	extractor             Extractor
+	pool                  DBPinger
+	cache                 ResultCache
+	extractions           ExtractionStore
+	consents              ConsentStore
+	trustedProxies        []*net.IPNet
+	corsOrigins           []string
+	auth                  Authenticator
+	limiter               RateLimiter
+	m2mUserForwardSecret  string
 }
 
 func New(deps Deps) (http.Handler, error) {
@@ -54,15 +57,16 @@ func New(deps Deps) (http.Handler, error) {
 		return nil, fmt.Errorf("rate limiter is required")
 	}
 	s := &Server{
-		extractor:      deps.Extractor,
-		pool:           deps.Pool,
-		cache:          deps.Cache,
-		extractions:    deps.Extractions,
-		consents:       deps.Consents,
-		trustedProxies: deps.TrustedProxies,
-		corsOrigins:    deps.CORSOrigins,
-		auth:           deps.Auth,
-		limiter:        deps.RateLimit,
+		extractor:            deps.Extractor,
+		pool:                 deps.Pool,
+		cache:                deps.Cache,
+		extractions:           deps.Extractions,
+		consents:             deps.Consents,
+		trustedProxies:       deps.TrustedProxies,
+		corsOrigins:          deps.CORSOrigins,
+		auth:                 deps.Auth,
+		limiter:              deps.RateLimit,
+		m2mUserForwardSecret: strings.TrimSpace(deps.M2MUserForwardSecret),
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -160,7 +164,7 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		"client_ip", clientIP,
 	)
 
-	authSubject, authClient, authEmail := resolveActor(r)
+	authSubject, authClient, authEmail := s.resolveActor(r)
 	s.recordConsent(r.Context(), store.ConsentRecord{
 		UserSub:       authSubject,
 		UserEmail:     authEmail,
@@ -348,14 +352,18 @@ func consentAccepted(r *http.Request, docType string) bool {
 }
 
 // resolveActor attributes persistence/consent to the end user when the Auth BFF
-// calls with an M2M token and forwards X-Kalke-User-*.
-func resolveActor(r *http.Request) (subject, client, email string) {
+// calls with an M2M token and forwards X-Kalke-User-* with a shared secret.
+// Without a valid forward secret, user headers are ignored (fail closed).
+func (s *Server) resolveActor(r *http.Request) (subject, client, email string) {
 	p, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
 		return "", "", ""
 	}
 	subject, client, email = p.Subject, p.Client, p.Email
 	if !isM2MPrincipal(p) {
+		return subject, client, email
+	}
+	if !s.acceptsUserForward(r) {
 		return subject, client, email
 	}
 	if sub := strings.TrimSpace(r.Header.Get(headerUserSub)); sub != "" {
@@ -365,6 +373,21 @@ func resolveActor(r *http.Request) (subject, client, email string) {
 		}
 	}
 	return subject, client, email
+}
+
+func (s *Server) acceptsUserForward(r *http.Request) bool {
+	if s == nil || s.m2mUserForwardSecret == "" {
+		return false
+	}
+	got := strings.TrimSpace(r.Header.Get(headerForwardSec))
+	if got == "" {
+		return false
+	}
+	want := s.m2mUserForwardSecret
+	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+		return true
+	}
+	return false
 }
 
 func isM2MPrincipal(p auth.Principal) bool {
@@ -383,7 +406,7 @@ func (s *Server) listExtractions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "extractions unavailable")
 		return
 	}
-	subject, _, _ := resolveActor(r)
+	subject, _, _ := s.resolveActor(r)
 	if subject == "" {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -404,7 +427,7 @@ func (s *Server) getExtraction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "extractions unavailable")
 		return
 	}
-	subject, _, _ := resolveActor(r)
+	subject, _, _ := s.resolveActor(r)
 	if subject == "" {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
