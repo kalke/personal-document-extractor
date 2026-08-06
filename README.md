@@ -217,7 +217,7 @@ Body shape for failures: `{"error":"…"}`. Full status/message catalog: [`opena
 - **Hit:** return Redis payload only (no Postgres write)
 - **Miss:** extract → Redis SETEX → Postgres INSERT; PG write failure after success still returns `200`
 - **`refresh=true`:** delete Redis key, soft-delete active Postgres row (`deleted_at`), re-extract, insert new row + cache
-- **Request origin:** on persist, store `client_ip` (trusted-proxy aware) and `user_agent` in Postgres only — never returned in the API response
+- **Request origin:** on persist, store `client_ip` (trusted-proxy aware) and `user_agent` in Postgres only — never returned in the API response. When the Auth BFF proxies with `X-Kalke-Forward-Secret`, prefer `X-Kalke-Client-IP` / `X-Kalke-User-Agent` (browser) over the BFF’s own address and `Go-http-client` UA.
 - **Principal:** on persist, store `auth_subject`, `auth_client` (`azp`), and `auth_email` when present
 
 ## Configuration

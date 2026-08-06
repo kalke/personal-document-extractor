@@ -9,7 +9,23 @@ import (
 const maxUserAgentLen = 512
 
 func (s *Server) requestOrigin(r *http.Request) (ip, userAgent string) {
-	return clientIP(r, s.trustedProxies), truncate(strings.TrimSpace(r.UserAgent()), maxUserAgentLen)
+	// Auth BFF proxies with Go's net/http; honor browser origin only when the
+	// shared forward secret is present (same trust as X-Kalke-User-*).
+	if s.acceptsUserForward(r) {
+		if fwd := normalizeIP(r.Header.Get(headerClientIP)); fwd != "" {
+			ip = fwd
+		}
+		if ua := strings.TrimSpace(r.Header.Get(headerClientUA)); ua != "" {
+			userAgent = truncate(ua, maxUserAgentLen)
+		}
+	}
+	if ip == "" {
+		ip = clientIP(r, s.trustedProxies)
+	}
+	if userAgent == "" {
+		userAgent = truncate(strings.TrimSpace(r.UserAgent()), maxUserAgentLen)
+	}
+	return ip, userAgent
 }
 
 // clientIP returns RemoteAddr by default. X-Forwarded-For / X-Real-IP are used

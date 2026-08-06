@@ -31,6 +31,8 @@ const (
 	headerUserSub     = "X-Kalke-User-Sub"
 	headerUserEmail   = "X-Kalke-User-Email"
 	headerForwardSec  = "X-Kalke-Forward-Secret"
+	headerClientIP    = "X-Kalke-Client-IP"
+	headerClientUA    = "X-Kalke-User-Agent"
 )
 
 type Server struct {
