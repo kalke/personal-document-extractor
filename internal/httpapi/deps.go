@@ -56,5 +56,5 @@ type Deps struct {
 	CORSOrigins          []string
 	Auth                 Authenticator
 	RateLimit            RateLimiter
-	M2MUserForwardSecret string   // shared with Auth BFF; required to honor X-Kalke-User-*
+	M2MUserForwardSecret string // shared with Auth BFF; required to honor X-Kalke-User-*
 }

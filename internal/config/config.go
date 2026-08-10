@@ -82,7 +82,6 @@ func Load() (Config, error) {
 		}
 	}
 
-
 	cfg := Config{
 		Port:                 getenv("PORT", "8080"),
 		GroqAPIKey:           strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
