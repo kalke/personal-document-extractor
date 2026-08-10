@@ -93,7 +93,6 @@ func main() {
 		CORSOrigins:          cfg.CORSOrigins,
 		Auth:                 authenticator,
 		RateLimit:            limiter,
-		AdminEmails:          cfg.AdminEmails,
 		M2MUserForwardSecret: cfg.M2MUserForwardSecret,
 	})
 	if err != nil {

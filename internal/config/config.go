@@ -30,7 +30,6 @@ type Config struct {
 	OIDCDiscoveryURL   string
 	AuthIntrospectURL  string
 	IntrospectSecret   string
-	AdminEmails        []string
 	RateLimitPerMinute int
 	// M2MUserForwardSecret gates X-Kalke-User-* forwarding from the Auth BFF.
 	// Empty means those headers are never trusted (fail closed).
@@ -83,10 +82,6 @@ func Load() (Config, error) {
 		}
 	}
 
-	adminEmails := parseCSV(os.Getenv("ADMIN_EMAILS"))
-	if len(adminEmails) == 0 {
-		adminEmails = []string{"henriquekalke@icloud.com"}
-	}
 
 	cfg := Config{
 		Port:                 getenv("PORT", "8080"),
@@ -109,7 +104,6 @@ func Load() (Config, error) {
 		OIDCDiscoveryURL:     strings.TrimSpace(os.Getenv("OIDC_DISCOVERY_URL")),
 		AuthIntrospectURL:    strings.TrimSpace(os.Getenv("AUTH_INTROSPECT_URL")),
 		IntrospectSecret:     strings.TrimSpace(os.Getenv("INTROSPECT_SECRET")),
-		AdminEmails:          adminEmails,
 		RateLimitPerMinute:   rateLimit,
 		M2MUserForwardSecret: strings.TrimSpace(os.Getenv("M2M_USER_FORWARD_SECRET")),
 	}
