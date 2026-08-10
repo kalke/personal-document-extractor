@@ -23,7 +23,7 @@ func TestUsablePDFText(t *testing.T) {
 		t.Fatal("identity-like text should be usable")
 	}
 
-	longCV := stringsRepeat("Experiencia profissional em engenharia de software com Go e Python. ", 20)
+	longCV := stringsRepeat("Experiencia em engenharia de software com Go e Python. ", 20)
 	if !usablePDFText(longCV) {
 		t.Fatal("long CV text should be usable")
 	}
