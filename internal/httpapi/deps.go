@@ -56,6 +56,5 @@ type Deps struct {
 	CORSOrigins          []string
 	Auth                 Authenticator
 	RateLimit            RateLimiter
-	AdminEmails          []string // optional; reserved for future admin-only routes
-	M2MUserForwardSecret string   // shared with Auth BFF; required to honor X-Kalke-User-*
+	M2MUserForwardSecret string // shared with Auth BFF; required to honor X-Kalke-User-*
 }

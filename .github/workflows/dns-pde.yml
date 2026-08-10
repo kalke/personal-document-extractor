@@ -17,7 +17,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records?type=A&name=pde.kalke.dev")
           echo "$EXISTING" | python3 -c 'import sys,json; d=json.load(sys.stdin); print("list_success", d.get("success"), d.get("errors")); print("existing", [(x["id"], x["content"], x.get("proxied")) for x in d.get("result") or []])'
           ID=$(echo "$EXISTING" | python3 -c 'import sys,json; r=json.load(sys.stdin).get("result") or []; print(r[0]["id"] if r else "")')
-          BODY='{"type":"A","name":"pde","content":"54.234.95.66","ttl":1,"proxied":false}'
+          BODY='{"type":"A","name":"pde","content":"32.197.176.57","ttl":1,"proxied":false}'
           if [[ -n "$ID" ]]; then
             RESP=$(curl -sS -X PUT -H "Authorization: Bearer ${CF_TOKEN}" -H "Content-Type: application/json" \
               --data "$BODY" "https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records/${ID}")

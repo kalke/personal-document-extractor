@@ -29,7 +29,7 @@ Everything is in Docker Desktop: `api`, `postgres`, `redis`, plus kalke-auth (`c
 - API: `http://localhost:8080`
 - IdP (host): `http://localhost:8443`
 - Inside Compose, the API reaches JWKS via `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while JWT `iss` stays `http://localhost:8443/realms/kalke`.
-- Production: **`pde.kalke.dev`** (same EC2 as kalke-auth + Neon + Upstash) — see [DEPLOY.md](DEPLOY.md). Hosted sandbox: [kalke.dev](https://kalke.dev).
+- Production: **`pde.kalke.dev`** on the shared EC2 (GHCR + Caddy). Secrets in GitHub → `prod.env` on deploy. DNS: grey-cloud `A pde → EIP`. Hosted sandbox: [kalke.dev](https://kalke.dev).
 
 ```bash
 make reset                 # recreate API stack, truncate extractions
@@ -280,36 +280,14 @@ GitHub Actions runs **lint**, **goose migrate** against a Postgres 18 service, *
 ## Layout
 
 ```
-LICENSE                 Apache-2.0
-openapi/openapi.yaml    Public API contract
-Makefile                Docker-first commands
-docker-compose.yml      api + postgres + redis
-Dockerfile              api + migrate binaries
-migrations/             goose SQL (embedded)
-cmd/api                 HTTP entrypoint (migrates on boot)
-cmd/migrate             goose up CLI
-internal/config         Env
-internal/db             pgx pool
-internal/auth           OIDC JWT (JWKS discovery)
-internal/authz          Scope checks
-internal/ratelimit      Redis per-principal limiter
-internal/cache          Redis extract cache
-internal/store          extractions
-internal/httpapi        /health, /ready, /v1/*
-internal/preprocess     validation, PDF render, image compact
-internal/normalize      CPF/CNPJ/CEP/date helpers
-internal/llm/groq       Groq client
-internal/extract        Prompt → LLM → decode → normalize
-internal/doctypes/*     Per-type schema + prompts
+cmd/api                 HTTP entrypoint
+cmd/migrate             goose CLI
+internal/               auth, httpapi, extract, store, cache, …
+migrations/             goose SQL
+openapi/openapi.yaml    API contract
+docker-compose.yml      local
+docker-compose.aws.yml  EC2 / GHCR
 ```
-
-## Roadmap (intentionally out of v1)
-
-- Website / OIDC login UI (Next.js SPA + kalke-auth)
-- Social IdP connections in Keycloak
-- Web3 wallet linking (`user_identities` when needed)
-- Fine-grained AuthZ (OPA / SpiceDB)
-- Multi-tenant orgs / billing
 
 ## Adding a document type
 
