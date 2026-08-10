@@ -59,7 +59,7 @@ func TestRequestOriginHonorsForwardedBrowser(t *testing.T) {
 	s := &Server{m2mUserForwardSecret: secret}
 
 	r := httptest.NewRequest(http.MethodPost, "/v1/extract", nil)
-	r.RemoteAddr = "54.234.95.66:443"
+	r.RemoteAddr = "32.197.176.57:443"
 	r.Header.Set("User-Agent", "Go-http-client/2.0")
 	r.Header.Set(headerForwardSec, secret)
 	r.Header.Set(headerClientIP, "198.51.100.42")
@@ -77,13 +77,13 @@ func TestRequestOriginHonorsForwardedBrowser(t *testing.T) {
 func TestRequestOriginIgnoresForwardWithoutSecret(t *testing.T) {
 	s := &Server{m2mUserForwardSecret: "fwd-secret"}
 	r := httptest.NewRequest(http.MethodPost, "/v1/extract", nil)
-	r.RemoteAddr = "54.234.95.66:443"
+	r.RemoteAddr = "32.197.176.57:443"
 	r.Header.Set("User-Agent", "Go-http-client/2.0")
 	r.Header.Set(headerClientIP, "198.51.100.42")
 	r.Header.Set(headerClientUA, "Mozilla/5.0")
 
 	ip, ua := s.requestOrigin(r)
-	if ip != "54.234.95.66" {
+	if ip != "32.197.176.57" {
 		t.Fatalf("ip=%q want EC2 remote", ip)
 	}
 	if ua != "Go-http-client/2.0" {
