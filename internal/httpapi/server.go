@@ -212,7 +212,13 @@ func (s *Server) extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := preprocess.Prepare(filename, data)
+	doc, err := preprocess.PrepareWithOptions(filename, data, preprocess.Options{
+		// Scanned ID / address / invoice PDFs often have a junk text layer that is
+		// long enough to skip vision; prefer rasterize+vision for those types.
+		PreferVision: docType == "identity_document" ||
+			docType == "address_proof" ||
+			docType == "invoice_nf",
+	})
 	if err != nil {
 		status, msg := mapPreprocessError(err)
 		log.Warn("preprocess failed", "err", err, "doc_type", docType, "status", status)
