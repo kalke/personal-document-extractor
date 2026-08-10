@@ -22,12 +22,15 @@ node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
 # Go
 coverage.out
 *.test
 tmp/
 .tmp/
+*.log
+vendor/
 
 # local production env (never commit)
 prod.env

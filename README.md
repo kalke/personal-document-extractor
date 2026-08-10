@@ -29,7 +29,7 @@ Everything is in Docker Desktop: `api`, `postgres`, `redis`, plus kalke-auth (`c
 - API: `http://localhost:8080`
 - IdP (host): `http://localhost:8443`
 - Inside Compose, the API reaches JWKS via `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while JWT `iss` stays `http://localhost:8443/realms/kalke`.
-- Production: **`pde.kalke.dev`** (Cloudflare Containers + Neon + Upstash) — see [DEPLOY.md](DEPLOY.md). Hosted sandbox: [kalke.dev](https://kalke.dev).
+- Production: **`pde.kalke.dev`** (same EC2 as kalke-auth + Neon + Upstash) — see [DEPLOY.md](DEPLOY.md). Hosted sandbox: [kalke.dev](https://kalke.dev).
 
 ```bash
 make reset                 # recreate API stack, truncate extractions
