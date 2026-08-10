@@ -136,7 +136,7 @@ jobs:
 
   deploy:
     name: Deploy
-    # Same EC2 as kalke-auth. Cloudflare Containers require Workers Paid.
+    # Same EC2 as kalke-auth. Deploy pulls GHCR image on the self-hosted runner.
     runs-on: [self-hosted, linux, pde-ec2]
     needs: [lint, test, security, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
