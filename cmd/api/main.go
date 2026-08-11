@@ -26,11 +26,16 @@ import (
 	"github.com/kalke/personal-document-extractor/internal/llm/groq"
 	"github.com/kalke/personal-document-extractor/internal/migrate"
 	"github.com/kalke/personal-document-extractor/internal/ratelimit"
+	"github.com/kalke/personal-document-extractor/internal/secrets"
 	"github.com/kalke/personal-document-extractor/internal/store"
 )
 
 func main() {
 	_ = godotenv.Load()
+	if err := secrets.MustLoad(); err != nil {
+		slog.Error("secrets", "err", err)
+		os.Exit(1)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -151,12 +156,23 @@ func setupLogger(level, format string) {
 	default:
 		lv = slog.LevelInfo
 	}
-	opts := &slog.HandlerOptions{Level: lv}
-	var h slog.Handler
-	if strings.EqualFold(format, "json") {
-		h = slog.NewJSONHandler(os.Stderr, opts)
-	} else {
-		h = slog.NewTextHandler(os.Stderr, opts)
+	opts := &slog.HandlerOptions{
+		Level: lv,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Key = "ts"
+			}
+			if a.Key == slog.MessageKey {
+				a.Key = "event"
+			}
+			return a
+		},
 	}
-	slog.SetDefault(slog.New(h))
+	var h slog.Handler
+	if strings.EqualFold(format, "text") {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	}
+	slog.SetDefault(slog.New(h).With("service", "pde-api"))
 }

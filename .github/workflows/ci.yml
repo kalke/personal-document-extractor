@@ -172,8 +172,10 @@ jobs:
             fi
           fi
 
-      - name: Sync prod.env from GitHub secrets
+      - name: Sync secrets to AWS Secrets Manager
         env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          SECRET_ID: kalke/pde/prod
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
@@ -185,16 +187,19 @@ jobs:
           set -euo pipefail
           umask 077
           python3 - <<'PY'
-          import os
+          import json, os, subprocess
           from pathlib import Path
-          path = Path.home() / "personal-document-extractor" / "prod.env"
+
           def q(v: str) -> str:
               return "'" + v.replace("'", "'\"'\"'") + "'"
+
           required = ("DATABASE_URL", "REDIS_ADDR", "INTROSPECT_SECRET", "GROQ_API_KEY", "M2M_USER_FORWARD_SECRET")
           missing = [k for k in required if not os.environ.get(k)]
           if missing:
               raise SystemExit(f"missing secrets: {', '.join(missing)}")
-          rows = {
+          region = os.environ.get("AWS_REGION") or "us-east-1"
+          secret_id = os.environ["SECRET_ID"]
+          payload = {
               "PORT": "8080",
               "DATABASE_URL": os.environ["DATABASE_URL"],
               "DB_SEARCH_PATH": "pde",
@@ -214,9 +219,31 @@ jobs:
               "LOG_FORMAT": "json",
               "RATE_LIMIT_PER_MINUTE": "60",
               "TRUSTED_PROXIES": "172.16.0.0/12,10.0.0.0/8",
+              "AWS_REGION": region,
           }
-          path.write_text("".join(f"{k}={q(v)}\n" for k, v in rows.items()))
-          print(f"wrote {path}")
+          raw = json.dumps(payload)
+          put = subprocess.run(
+              ["aws", "secretsmanager", "put-secret-value", "--region", region,
+               "--secret-id", secret_id, "--secret-string", raw],
+              capture_output=True, text=True,
+          )
+          if put.returncode != 0:
+              create = subprocess.run(
+                  ["aws", "secretsmanager", "create-secret", "--region", region,
+                   "--name", secret_id, "--secret-string", raw],
+                  capture_output=True, text=True,
+              )
+              if create.returncode != 0:
+                  raise SystemExit(
+                      f"secretsmanager put/create failed for {secret_id}: "
+                      f"{put.stderr or put.stdout} / {create.stderr or create.stdout}"
+                  )
+              print(f"created secret {secret_id}")
+          else:
+              print(f"updated secret {secret_id}")
+          path = Path.home() / "personal-document-extractor" / "prod.env"
+          path.write_text(f"AWS_REGION={q(region)}\nSECRET_ID={q(secret_id)}\n")
+          print(f"wrote slim {path}")
           PY
 
       - name: Login to GHCR

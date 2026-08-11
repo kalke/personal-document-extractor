@@ -90,18 +90,36 @@ func New(deps Deps) (http.Handler, error) {
 func accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		reqID := middleware.GetReqID(r.Context())
+		if reqID != "" {
+			w.Header().Set("X-Request-ID", reqID)
+		}
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
-		if r.URL.Path == "/health" {
+		if r.URL.Path == "/health" || r.URL.Path == "/ready" {
 			return
 		}
-		slog.Info("http",
-			"req_id", middleware.GetReqID(r.Context()),
+		status := ww.Status()
+		if status == 0 {
+			status = http.StatusOK
+		}
+		outcome := "ok"
+		level := slog.LevelInfo
+		if status >= 500 {
+			outcome = "error"
+			level = slog.LevelError
+		} else if status >= 400 {
+			outcome = "error"
+			level = slog.LevelWarn
+		}
+		slog.Log(r.Context(), level, "http.request",
+			"request_id", reqID,
 			"method", r.Method,
 			"path", r.URL.Path,
-			"status", ww.Status(),
+			"status_code", status,
 			"bytes", ww.BytesWritten(),
 			"duration_ms", time.Since(start).Milliseconds(),
+			"outcome", outcome,
 		)
 	})
 }
