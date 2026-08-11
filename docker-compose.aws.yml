@@ -24,7 +24,6 @@ services:
         awslogs-region: ${AWS_REGION:-us-east-1}
         awslogs-group: /kalke/pde
         awslogs-create-group: "true"
-        awslogs-stream-prefix: api
     expose:
       - "8080"
     mem_limit: 384m
