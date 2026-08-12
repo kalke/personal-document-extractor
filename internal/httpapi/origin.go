@@ -28,16 +28,12 @@ func (s *Server) requestOrigin(r *http.Request) (ip, userAgent string) {
 	return ip, userAgent
 }
 
-// clientIP returns RemoteAddr by default. X-Forwarded-For / X-Real-IP are used
-// only when the immediate peer is in trustedProxies (CIDR allowlist).
+// clientIP returns RemoteAddr by default. X-Real-IP is used only when the
+// immediate peer is in trustedProxies (Caddy). Client-supplied X-Forwarded-For
+// is ignored.
 func clientIP(r *http.Request, trusted []*net.IPNet) string {
 	remote := remoteAddrIP(r)
 	if remote != "" && ipInNets(remote, trusted) {
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			if ip := firstIP(xff); ip != "" {
-				return ip
-			}
-		}
 		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
 			if ip := normalizeIP(xri); ip != "" {
 				return ip
@@ -69,14 +65,6 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 		}
 	}
 	return false
-}
-
-func firstIP(forwardedFor string) string {
-	parts := strings.Split(forwardedFor, ",")
-	if len(parts) == 0 {
-		return ""
-	}
-	return normalizeIP(parts[0])
 }
 
 func normalizeIP(s string) string {

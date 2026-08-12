@@ -161,12 +161,13 @@ Authenticated **cache-miss** extract calls (LLM/Groq) are limited per principal 
 
 ### `POST /v1/extract`
 
-Requires Bearer auth (any signed-in user / active PAT) + LGPD consent.
+Requires Bearer auth with `extract:write` (or `admin`) + LGPD consent. Other
+authenticated principals receive **403**.
 
 Query:
 
 - `doc_type` (required)
-- `refresh` (optional) — `true` / `1` / `yes` skips Redis, soft-deletes prior Postgres row for the same hash, re-extracts, and writes a new row
+- `refresh` (optional) — `true` / `1` / `yes` skips Redis, soft-deletes **this principal's** prior Postgres row for the same hash, re-extracts, and writes a new row
 
 Body: `multipart/form-data` fields `file` and `consent` (`lgpd-extract-v1`).
 

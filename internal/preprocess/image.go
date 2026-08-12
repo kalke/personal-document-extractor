@@ -13,12 +13,24 @@ import (
 )
 
 const (
-	maxImageEdge  = 1600
-	jpegQuality   = 85
-	maxImageBytes = 1_500_000
+	maxImageEdge     = 1600
+	jpegQuality      = 85
+	maxImageBytes    = 1_500_000
+	maxDecodePixels  = 20_000_000
 )
 
 func CompactImage(data []byte) ([]byte, string, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("decode image: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, "", fmt.Errorf("decode image: invalid dimensions")
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels {
+		return nil, "", fmt.Errorf("decode image: dimensions too large")
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", fmt.Errorf("decode image: %w", err)

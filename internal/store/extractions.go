@@ -79,7 +79,8 @@ func (s *Extractions) persist(ctx context.Context, rec ExtractionRecord, replace
 			WHERE doc_type = $1
 			  AND content_sha256 = $2
 			  AND deleted_at IS NULL
-		`, rec.DocType, rec.ContentSHA256); err != nil {
+			  AND auth_subject IS NOT DISTINCT FROM $3
+		`, rec.DocType, rec.ContentSHA256, nullIfEmpty(rec.AuthSubject)); err != nil {
 			return fmt.Errorf("soft delete extraction: %w", err)
 		}
 	}

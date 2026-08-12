@@ -288,6 +288,36 @@ func TestExtractAnyAuthenticatedUserAllowed(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if consents.len() != 0 {
+		t.Fatalf("expected no consent row, got %d", consents.len())
+	}
+}
+
+func TestExtractWriteScopeAllowed(t *testing.T) {
+	consents := &memoryConsentStore{}
+	h := mustHandler(t, httpapi.Deps{
+		Extractor: &stubExtractor{
+			result: extract.Result{
+				DocType: "identity_document",
+				Data:    map[string]any{"nome": "USER"},
+				Meta:    extract.Meta{Mode: "vision"},
+			},
+		},
+		Consents: consents,
+		Auth: &stubAuth{principals: map[string]auth.Principal{
+			testBearer: {
+				Subject: "oidc|signup-user",
+				Email:   "recruiter@example.com",
+				Kind:    auth.KindJWT,
+				Scopes:  []string{auth.ScopeExtractWrite},
+			},
+		}},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, multipartRequest(t, "/v1/extract?doc_type=identity_document", "doc.png", tinyPNG(t)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}

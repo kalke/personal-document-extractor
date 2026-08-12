@@ -51,8 +51,24 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 	if err := ex.Insert(ctx, rec); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
+	other := rec
+	other.AuthSubject = "oidc|other-user"
+	if err := ex.Insert(ctx, other); err != nil {
+		t.Fatalf("insert other: %v", err)
+	}
 	if err := ex.Replace(ctx, rec); err != nil {
 		t.Fatalf("replace: %v", err)
+	}
+
+	var otherActive int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM extractions
+		WHERE content_sha256 = $1 AND auth_subject = $2 AND deleted_at IS NULL
+	`, sha, other.AuthSubject).Scan(&otherActive); err != nil {
+		t.Fatal(err)
+	}
+	if otherActive != 1 {
+		t.Fatalf("other subject active=%d want 1", otherActive)
 	}
 
 	var active int

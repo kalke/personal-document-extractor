@@ -53,6 +53,10 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		if !principal.HasScope(auth.ScopeExtractWrite) {
+			writeErr(w, http.StatusForbidden, "missing permission extract:write")
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	})
 }

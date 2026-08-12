@@ -38,6 +38,21 @@ func TestScopesFromClaims(t *testing.T) {
 	}
 }
 
+func TestHasScope(t *testing.T) {
+	admin := Principal{Scopes: []string{ScopeAdmin}}
+	if !admin.HasScope(ScopeExtractWrite) {
+		t.Fatal("admin should imply extract:write")
+	}
+	writer := Principal{Scopes: []string{ScopeExtractWrite}}
+	if !writer.HasScope(ScopeExtractWrite) {
+		t.Fatal("extract:write should allow extract:write")
+	}
+	openid := Principal{Scopes: []string{"openid"}}
+	if openid.HasScope(ScopeExtractWrite) {
+		t.Fatal("openid alone should not allow extract:write")
+	}
+}
+
 func TestNewAuthenticatorRequiresOIDC(t *testing.T) {
 	if _, err := NewAuthenticator(Options{}); err == nil {
 		t.Fatal("expected error when issuer/audience empty")
