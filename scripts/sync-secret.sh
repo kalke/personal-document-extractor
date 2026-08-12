@@ -14,17 +14,18 @@ if ! command -v aws >/dev/null 2>&1; then
   exit 1
 fi
 
-raw="$(cat "${PAYLOAD_FILE}")"
+# Pass payload via file:// so shell metacharacters in secrets never expand.
+PAYLOAD_URI="file://${PAYLOAD_FILE}"
 if aws secretsmanager put-secret-value \
   --region "${REGION}" \
   --secret-id "${SECRET_ID}" \
-  --secret-string "${raw}" >/dev/null 2>&1; then
+  --secret-string "${PAYLOAD_URI}" >/dev/null 2>&1; then
   echo "updated secret ${SECRET_ID}"
 else
   aws secretsmanager create-secret \
     --region "${REGION}" \
     --name "${SECRET_ID}" \
-    --secret-string "${raw}" >/dev/null
+    --secret-string "${PAYLOAD_URI}" >/dev/null
   echo "created secret ${SECRET_ID}"
 fi
 
