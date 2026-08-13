@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	maxImageEdge     = 1600
-	jpegQuality      = 85
-	maxImageBytes    = 1_500_000
-	maxDecodePixels  = 20_000_000
+	maxImageEdge    = 1600
+	jpegQuality     = 85
+	maxImageBytes   = 1_500_000
+	maxDecodePixels = 20_000_000
 )
 
 func CompactImage(data []byte) ([]byte, string, error) {
