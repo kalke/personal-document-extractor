@@ -92,10 +92,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: gosec
-        uses: securego/gosec@master
-        with:
-          args: -severity high ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -severity high ./...
       - name: govulncheck
+        env:
+          GOTOOLCHAIN: local
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
