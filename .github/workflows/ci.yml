@@ -27,7 +27,22 @@ jobs:
           version: v2.12
           args: ./...
       - name: Go fmt check
-        run: test -z "$(gofmt -l .)"
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            echo "Files need gofmt:" >&2
+            echo "$unformatted" >&2
+            gofmt -d .
+            exit 1
+          fi
+      - name: Line endings (LF)
+        run: |
+          crlf="$(git grep -Il $'\r' || true)"
+          if [[ -n "$crlf" ]]; then
+            echo "CRLF line endings found (use LF):" >&2
+            echo "$crlf" >&2
+            exit 1
+          fi
 
   test:
     name: Test

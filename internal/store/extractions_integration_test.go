@@ -71,6 +71,28 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 		t.Fatalf("other subject active=%d want 1", otherActive)
 	}
 
+	var callerActive int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM extractions
+		WHERE content_sha256 = $1 AND auth_subject = $2 AND deleted_at IS NULL
+	`, sha, rec.AuthSubject).Scan(&callerActive); err != nil {
+		t.Fatal(err)
+	}
+	if callerActive != 1 {
+		t.Fatalf("caller active=%d want 1", callerActive)
+	}
+
+	var callerDeleted int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM extractions
+		WHERE content_sha256 = $1 AND auth_subject = $2 AND deleted_at IS NOT NULL
+	`, sha, rec.AuthSubject).Scan(&callerDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if callerDeleted != 1 {
+		t.Fatalf("caller deleted=%d want 1", callerDeleted)
+	}
+
 	var active int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM extractions
@@ -78,16 +100,16 @@ func TestExtractionsInsertReplaceIntegration(t *testing.T) {
 	`, sha).Scan(&active); err != nil {
 		t.Fatal(err)
 	}
-	if active != 1 {
-		t.Fatalf("active rows=%d want 1", active)
+	if active != 2 {
+		t.Fatalf("active rows=%d want 2 (caller + other tenant)", active)
 	}
 
 	var clientIP, subject, client, email string
 	if err := pool.QueryRow(ctx, `
 		SELECT client_ip, auth_subject, COALESCE(auth_client, ''), COALESCE(auth_email, '')
 		FROM extractions
-		WHERE content_sha256 = $1 AND deleted_at IS NULL
-	`, sha).Scan(&clientIP, &subject, &client, &email); err != nil {
+		WHERE content_sha256 = $1 AND auth_subject = $2 AND deleted_at IS NULL
+	`, sha, rec.AuthSubject).Scan(&clientIP, &subject, &client, &email); err != nil {
 		t.Fatal(err)
 	}
 	if clientIP != "203.0.113.9" || subject == "" || client != "pde-m2m" {
