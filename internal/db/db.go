@@ -48,8 +48,8 @@ func Connect(ctx context.Context, databaseURL string, searchPath ...string) (*pg
 		return nil, err
 	}
 
-	// Neon pooler (transaction mode) rejects search_path startup params and drops
-	// session SET between transactions. Re-apply on every checkout.
+	// Re-apply search_path on every checkout so pooled connections stay on
+	// the pde schema (SET is session-scoped).
 	quoted := pgx.Identifier{path}.Sanitize()
 	setSQL := "SET search_path TO " + quoted + ", public"
 	cfg.PrepareConn = func(ctx context.Context, conn *pgx.Conn) (bool, error) {
