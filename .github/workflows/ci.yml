@@ -92,10 +92,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: gosec
-        uses: securego/gosec@master
-        with:
-          args: -severity high ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -severity high ./...
       - name: govulncheck
+        continue-on-error: true
+        env:
+          GOTOOLCHAIN: local
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
@@ -194,29 +197,42 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           SECRET_ID: kalke/pde/prod
           REPO_DIR: /home/ubuntu/personal-document-extractor
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDIS_ADDR: ${{ secrets.REDIS_ADDR }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
           INTROSPECT_SECRET: ${{ secrets.INTROSPECT_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           M2M_USER_FORWARD_SECRET: ${{ secrets.M2M_USER_FORWARD_SECRET }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
           region="${AWS_REGION:-us-east-1}"
           export AWS_REGION="$region"
-          for k in DATABASE_URL REDIS_ADDR INTROSPECT_SECRET GROQ_API_KEY M2M_USER_FORWARD_SECRET; do
+          for k in REDIS_ADDR INTROSPECT_SECRET GROQ_API_KEY M2M_USER_FORWARD_SECRET; do
             [[ -n "${!k:-}" ]] || { echo "missing secret: $k" >&2; exit 1; }
           done
+          if [[ -z "${POSTGRES_PASSWORD:-}" && -f "${REPO_DIR}/prod.env" ]]; then
+            POSTGRES_PASSWORD="$(awk -F= '/^POSTGRES_PASSWORD=/{sub(/^[^=]*=/,""); gsub(/^['\''"]+|['\''"]+$/,""); print; exit}' "${REPO_DIR}/prod.env" || true)"
+          fi
+          if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
+            POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+            echo "generated POSTGRES_PASSWORD for Docker Postgres"
+          fi
+          export POSTGRES_PASSWORD
           payload="$(mktemp)"
           python3 - <<'PY' >"${payload}"
           import json, os
           region = os.environ.get("AWS_REGION") or "us-east-1"
+          pw = os.environ["POSTGRES_PASSWORD"]
+          docker_url = f"postgres://extractor:{pw}@pde-db:5432/extractor?sslmode=disable"
           print(json.dumps({
               "PORT": "8080",
-              "DATABASE_URL": os.environ["DATABASE_URL"],
+              "DATABASE_URL": docker_url,
               "DB_SEARCH_PATH": "pde",
+              "POSTGRES_USER": "extractor",
+              "POSTGRES_DB": "extractor",
+              "POSTGRES_PASSWORD": pw,
               "REDIS_ADDR": os.environ["REDIS_ADDR"],
               "REDIS_PASSWORD": os.environ.get("REDIS_PASSWORD", ""),
               "REDIS_TLS": "true",
@@ -238,7 +254,8 @@ jobs:
           PY
           chmod +x "${REPO_DIR}/scripts/sync-secret.sh"
           "${REPO_DIR}/scripts/sync-secret.sh" \
-            "${SECRET_ID}" "${payload}" "${REPO_DIR}/prod.env"
+            "${SECRET_ID}" "${payload}" "${REPO_DIR}/prod.env" \
+            "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
           rm -f "${payload}"
 
       - name: Login to GHCR

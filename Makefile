@@ -275,17 +275,20 @@ smoke-m2m: ## M2M JWT smoke: client_credentials → POST /v1/extract without fil
 clean: ## Remove local build artifacts
 	rm -rf bin/ dist/ tmp/ .tmp/ coverage.out
 
-COMPOSE_AWS ?= docker compose -f docker-compose.aws.yml
+COMPOSE_AWS ?= docker compose -f docker-compose.aws.yml --env-file prod.env
 PDE_IMAGE ?= ghcr.io/kalke/personal-document-extractor:latest
 
 .PHONY: aws-up
-aws-up: ## Prod on AWS EC2: pull GHCR image + start API on kalke-auth network
+aws-up: ## Prod on AWS EC2: Docker Postgres + GHCR API on kalke-auth network
 	@test -f prod.env || { echo "prod.env missing — copy prod.env.example and fill secrets"; exit 1; }
 	@docker network inspect kalke-auth_default >/dev/null 2>&1 || { \
 		echo "Missing Docker network kalke-auth_default. Start kalke-auth first (make aws-up there)."; \
 		exit 1; \
 	}
+	@chmod +x scripts/ensure-postgres-password.sh
+	@bash scripts/ensure-postgres-password.sh
 	@docker builder prune -af >/dev/null 2>&1 || true
+	PDE_IMAGE="$(PDE_IMAGE)" $(COMPOSE_AWS) up -d pde-db --wait
 	PDE_IMAGE="$(PDE_IMAGE)" $(COMPOSE_AWS) pull api
 	PDE_IMAGE="$(PDE_IMAGE)" $(COMPOSE_AWS) up -d --wait --no-build
 	@docker image prune -f >/dev/null 2>&1 || true

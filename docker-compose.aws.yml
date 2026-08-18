@@ -1,8 +1,51 @@
+# Production stack for AWS EC2 (same host as kalke-auth).
+# Postgres is Docker-only — do not publish :5432.
+#
+#   cp prod.env.example prod.env
+#   make aws-up
+#
 services:
+  pde-db:
+    image: postgres:18-alpine
+    container_name: pde-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-extractor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in prod.env}
+      POSTGRES_DB: ${POSTGRES_DB:-extractor}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=50
+      - -c
+      - effective_cache_size=128MB
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    mem_limit: 192m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /kalke/pde
+        awslogs-create-group: "true"
+    networks:
+      - kalke-auth
+
   api:
     image: ${PDE_IMAGE:-ghcr.io/kalke/personal-document-extractor:latest}
     container_name: pde-api
     restart: unless-stopped
+    depends_on:
+      pde-db:
+        condition: service_healthy
     env_file:
       - prod.env
     environment:
@@ -18,6 +61,12 @@ services:
       AUTH_INTROSPECT_URL: ${AUTH_INTROSPECT_URL:-https://auth.kalke.dev/v1/introspect}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://kalke.dev,https://www.kalke.dev}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8}
+      POSTGRES_USER: ${POSTGRES_USER:-extractor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in prod.env}
+      POSTGRES_DB: ${POSTGRES_DB:-extractor}
+      DB_SEARCH_PATH: ${DB_SEARCH_PATH:-pde}
+      # Compose wins over Secrets Manager (MustLoad does not overwrite).
+      DATABASE_URL: postgres://${POSTGRES_USER:-extractor}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in prod.env}@pde-db:5432/${POSTGRES_DB:-extractor}?sslmode=disable
     logging:
       driver: awslogs
       options:
@@ -40,3 +89,6 @@ networks:
   kalke-auth:
     external: true
     name: kalke-auth_default
+
+volumes:
+  pgdata:
