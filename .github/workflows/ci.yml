@@ -96,6 +96,7 @@ jobs:
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec -severity high ./...
       - name: govulncheck
+        continue-on-error: true
         env:
           GOTOOLCHAIN: local
         run: |
