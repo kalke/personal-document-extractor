@@ -1,5 +1,6 @@
 # Production stack for AWS EC2 (same host as kalke-auth).
 # Postgres is Docker-only — do not publish :5432.
+# Static IP 172.18.10.12 for Cloudflare WARP / DBeaver (WARP required).
 #
 #   cp prod.env.example prod.env
 #   make aws-up
@@ -37,7 +38,8 @@ services:
         awslogs-group: /kalke/pde
         awslogs-create-group: "true"
     networks:
-      - kalke-auth
+      kalke-auth:
+        ipv4_address: 172.18.10.12
 
   api:
     image: ${PDE_IMAGE:-ghcr.io/kalke/personal-document-extractor:latest}

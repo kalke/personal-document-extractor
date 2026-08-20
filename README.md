@@ -29,7 +29,7 @@ Everything is in Docker Desktop: `api`, `postgres`, `redis`, plus kalke-auth (`c
 - API: `http://localhost:8080`
 - IdP (host): `http://localhost:8443`
 - Inside Compose, the API reaches JWKS via `http://caddy:8443` (`OIDC_DISCOVERY_URL`) while JWT `iss` stays `http://localhost:8443/realms/kalke`.
-- Production: **`pde.kalke.dev`** on the shared EC2 (GHCR + Docker Postgres + Caddy). Secrets in GitHub → Secrets Manager / slim `prod.env` on deploy. DNS: grey-cloud `A pde → EIP`. Hosted sandbox: [kalke.dev](https://kalke.dev).
+- Production: **`pde.kalke.dev`** on the shared EC2 (GHCR + Docker Postgres at `172.18.10.12` + Caddy). DBeaver over Cloudflare WARP (user/db `extractor`). Secrets in GitHub → Secrets Manager / slim `prod.env` on deploy. DNS: grey-cloud `A pde → EIP`. Hosted sandbox: [kalke.dev](https://kalke.dev).
 
 ```bash
 make reset                 # recreate API stack, truncate extractions
