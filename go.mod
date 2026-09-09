@@ -10,7 +10,7 @@ require (
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.1
-	github.com/alicebob/miniredis/v2 v2.38.0
+	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/aws/aws-sdk-go-v2 v1.43.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.37
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.44.6
